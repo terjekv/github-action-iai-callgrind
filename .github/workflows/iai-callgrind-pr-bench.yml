@@ -68,11 +68,26 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
+      - name: Resolve workflow source
+        id: workflow_source
+        run: |
+          WORKFLOW_REF='${{ github.workflow_ref }}'
+          REPOSITORY="${WORKFLOW_REF%%/.github/workflows/*}"
+          REF="${WORKFLOW_REF##*@}"
+
+          if [ "$REPOSITORY" = "$WORKFLOW_REF" ] || [ "$REF" = "$WORKFLOW_REF" ]; then
+            echo "Unable to parse github.workflow_ref: $WORKFLOW_REF" >&2
+            exit 1
+          fi
+
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
       - name: Checkout benchmark action repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.action_repository }}
-          ref: ${{ github.action_ref }}
+          repository: ${{ steps.workflow_source.outputs.repository }}
+          ref: ${{ steps.workflow_source.outputs.ref }}
           path: action-src
 
       - name: Checkout caller repository
@@ -103,11 +118,26 @@ jobs:
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
 
     steps:
+      - name: Resolve workflow source
+        id: workflow_source
+        run: |
+          WORKFLOW_REF='${{ github.workflow_ref }}'
+          REPOSITORY="${WORKFLOW_REF%%/.github/workflows/*}"
+          REF="${WORKFLOW_REF##*@}"
+
+          if [ "$REPOSITORY" = "$WORKFLOW_REF" ] || [ "$REF" = "$WORKFLOW_REF" ]; then
+            echo "Unable to parse github.workflow_ref: $WORKFLOW_REF" >&2
+            exit 1
+          fi
+
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
       - name: Checkout benchmark action repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.action_repository }}
-          ref: ${{ github.action_ref }}
+          repository: ${{ steps.workflow_source.outputs.repository }}
+          ref: ${{ steps.workflow_source.outputs.ref }}
           path: action-src
 
       - name: Checkout caller repository
@@ -170,11 +200,26 @@ jobs:
       has_regressions: ${{ steps.render.outputs.has_regressions }}
 
     steps:
+      - name: Resolve workflow source
+        id: workflow_source
+        run: |
+          WORKFLOW_REF='${{ github.workflow_ref }}'
+          REPOSITORY="${WORKFLOW_REF%%/.github/workflows/*}"
+          REF="${WORKFLOW_REF##*@}"
+
+          if [ "$REPOSITORY" = "$WORKFLOW_REF" ] || [ "$REF" = "$WORKFLOW_REF" ]; then
+            echo "Unable to parse github.workflow_ref: $WORKFLOW_REF" >&2
+            exit 1
+          fi
+
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
       - name: Checkout benchmark action repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.action_repository }}
-          ref: ${{ github.action_ref }}
+          repository: ${{ steps.workflow_source.outputs.repository }}
+          ref: ${{ steps.workflow_source.outputs.ref }}
           path: action-src
 
       - name: Download benchmark artifacts
