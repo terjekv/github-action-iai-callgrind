@@ -58,6 +58,10 @@ jobs:
 - `regression_threshold_pct` (number, default `3`)
 - `fail_on_regression` (boolean, default `false`)
 - `comment_mode` (`always` | `on-regression` | `never`, default `always`)
+- `action_repository` (string, default `terjekv/github-action-iai-callgrind`)
+  - Repository containing this reusable workflow and its scripts.
+- `action_ref` (string, default empty)
+  - Ref (sha/tag/branch) for `action_repository`. Required when `action_repository` is not the default.
 
 ## Benchmark location
 
