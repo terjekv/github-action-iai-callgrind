@@ -68,11 +68,26 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
+      - name: Resolve workflow source
+        id: workflow_source
+        run: |
+          WORKFLOW_REF='${{ github.workflow_ref }}'
+          REPOSITORY="${WORKFLOW_REF%%/.github/workflows/*}"
+          REF="${WORKFLOW_REF##*@}"
+
+          if [ "$REPOSITORY" = "$WORKFLOW_REF" ] || [ "$REF" = "$WORKFLOW_REF" ]; then
+            echo "Unable to parse github.workflow_ref: $WORKFLOW_REF" >&2
+            exit 1
+          fi
+
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
       - name: Checkout benchmark action repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.action_repository }}
-          ref: ${{ github.action_ref }}
+          repository: ${{ steps.workflow_source.outputs.repository }}
+          ref: ${{ steps.workflow_source.outputs.ref }}
           path: action-src
 
       - name: Checkout caller repository
@@ -103,11 +118,26 @@ jobs:
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
 
     steps:
+      - name: Resolve workflow source
+        id: workflow_source
+        run: |
+          WORKFLOW_REF='${{ github.workflow_ref }}'
+          REPOSITORY="${WORKFLOW_REF%%/.github/workflows/*}"
+          REF="${WORKFLOW_REF##*@}"
+
+          if [ "$REPOSITORY" = "$WORKFLOW_REF" ] || [ "$REF" = "$WORKFLOW_REF" ]; then
+            echo "Unable to parse github.workflow_ref: $WORKFLOW_REF" >&2
+            exit 1
+          fi
+
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
       - name: Checkout benchmark action repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.action_repository }}
-          ref: ${{ github.action_ref }}
+          repository: ${{ steps.workflow_source.outputs.repository }}
+          ref: ${{ steps.workflow_source.outputs.ref }}
           path: action-src
 
       - name: Checkout caller repository
@@ -139,10 +169,12 @@ jobs:
 
       - name: Ensure iai-callgrind runner is available
         run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           if ! command -v iai-callgrind-runner >/dev/null 2>&1; then
             cargo install --locked iai-callgrind-runner
           fi
 
+          echo "IAI_CALLGRIND_RUNNER=$(command -v iai-callgrind-runner)" >> "$GITHUB_ENV"
       - name: Ensure valgrind is available
         run: |
           if ! command -v valgrind >/dev/null 2>&1; then
@@ -176,11 +208,26 @@ jobs:
       has_regressions: ${{ steps.render.outputs.has_regressions }}
 
     steps:
+      - name: Resolve workflow source
+        id: workflow_source
+        run: |
+          WORKFLOW_REF='${{ github.workflow_ref }}'
+          REPOSITORY="${WORKFLOW_REF%%/.github/workflows/*}"
+          REF="${WORKFLOW_REF##*@}"
+
+          if [ "$REPOSITORY" = "$WORKFLOW_REF" ] || [ "$REF" = "$WORKFLOW_REF" ]; then
+            echo "Unable to parse github.workflow_ref: $WORKFLOW_REF" >&2
+            exit 1
+          fi
+
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
       - name: Checkout benchmark action repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.action_repository }}
-          ref: ${{ github.action_ref }}
+          repository: ${{ steps.workflow_source.outputs.repository }}
+          ref: ${{ steps.workflow_source.outputs.ref }}
           path: action-src
 
       - name: Download benchmark artifacts

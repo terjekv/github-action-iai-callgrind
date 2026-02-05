@@ -18,8 +18,11 @@ def parse_summary(path: pathlib.Path) -> int | None:
                     break
                 if line.startswith("summary:"):
                     _, value = line.split(":", 1)
-                    return int(value.strip())
-    except OSError:
+                    # Newer callgrind formats can emit multiple values in summary.
+                    # We compare the primary event (first value) for compatibility.
+                    first_token = value.strip().split()[0]
+                    return int(first_token)
+    except (OSError, ValueError, IndexError):
         return None
     return None
 
