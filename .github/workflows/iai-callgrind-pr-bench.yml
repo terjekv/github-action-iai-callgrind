@@ -1,0 +1,249 @@
+name: IAI-Callgrind PR Bench
+
+on:
+  workflow_call:
+    inputs:
+      benchmarks_json:
+        description: >-
+          JSON array of benchmark specs. String entries are treated as cargo --bench targets.
+          Object entries support: name, bench, command, manifest_path, package, args.
+        required: false
+        type: string
+        default: "[]"
+      auto_discover:
+        description: Discover benches from benches/*.rs when benchmarks_json is empty.
+        required: false
+        type: boolean
+        default: true
+      feature_sets_json:
+        description: >-
+          JSON array of feature sets. String entries map to features. Object entries support:
+          name, features, no_default_features.
+        required: false
+        type: string
+        default: '[{"name":"default","features":""}]'
+      working_directory:
+        description: Working directory to run benchmark commands in.
+        required: false
+        type: string
+        default: "."
+      toolchain:
+        description: Rust toolchain to use.
+        required: false
+        type: string
+        default: stable
+      cargo_args:
+        description: Extra args appended to every benchmark command.
+        required: false
+        type: string
+        default: ""
+      base_sha:
+        description: Optional override for PR base SHA.
+        required: false
+        type: string
+        default: ""
+      regression_threshold_pct:
+        description: Percent increase in instructions considered a regression.
+        required: false
+        type: number
+        default: 3
+      fail_on_regression:
+        description: Fail workflow if any case regresses above threshold.
+        required: false
+        type: boolean
+        default: false
+      comment_mode:
+        description: PR comment behavior (always, on-regression, never).
+        required: false
+        type: string
+        default: always
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout benchmark action repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.action_repository }}
+          ref: ${{ github.action_ref }}
+          path: action-src
+
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: repo
+
+      - name: Build matrix
+        id: matrix
+        run: |
+          python3 action-src/scripts/expand_matrix.py \
+            --repo-path repo \
+            --working-directory "${{ inputs.working_directory }}" \
+            --benchmarks-json '${{ inputs.benchmarks_json }}' \
+            --feature-sets-json '${{ inputs.feature_sets_json }}' \
+            ${{ inputs.auto_discover && '--auto-discover' || '' }} \
+            --cargo-args "${{ inputs.cargo_args }}" \
+            --output matrix.json
+
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+
+  benchmark:
+    runs-on: ubuntu-latest
+    needs: prepare-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+
+    steps:
+      - name: Checkout benchmark action repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.action_repository }}
+          ref: ${{ github.action_ref }}
+          path: action-src
+
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: repo
+
+      - name: Resolve base SHA
+        id: refs
+        run: |
+          BASE_SHA='${{ inputs.base_sha }}'
+          if [ -z "$BASE_SHA" ]; then
+            BASE_SHA='${{ github.event.pull_request.base.sha }}'
+          fi
+
+          if [ -z "$BASE_SHA" ]; then
+            echo "Unable to resolve base SHA. Pass 'base_sha' input when not running on pull_request." >&2
+            exit 1
+          fi
+
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Ensure valgrind is available
+        run: |
+          if ! command -v valgrind >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y valgrind
+          fi
+
+      - name: Run benchmark pair
+        run: |
+          mkdir -p artifacts
+          python3 action-src/scripts/run_pair.py \
+            --repo-path repo \
+            --working-directory "${{ inputs.working_directory }}" \
+            --benchmark-name "${{ matrix.benchmark_name }}" \
+            --feature-name "${{ matrix.feature_name }}" \
+            --command "${{ matrix.command }}" \
+            --head-sha "${{ steps.refs.outputs.head_sha }}" \
+            --base-sha "${{ steps.refs.outputs.base_sha }}" \
+            --output artifacts/result.json
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-result-${{ matrix.id }}
+          path: artifacts/result.json
+
+  report:
+    runs-on: ubuntu-latest
+    needs: benchmark
+    outputs:
+      has_regressions: ${{ steps.render.outputs.has_regressions }}
+
+    steps:
+      - name: Checkout benchmark action repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.action_repository }}
+          ref: ${{ github.action_ref }}
+          path: action-src
+
+      - name: Download benchmark artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-result-*
+          path: artifacts
+
+      - name: Render report
+        id: render
+        run: |
+          python3 action-src/scripts/render_report.py \
+            --artifacts-dir artifacts \
+            --threshold "${{ inputs.regression_threshold_pct }}" \
+            --markdown-output report.md \
+            --summary-output summary.json
+
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-report
+          path: |
+            report.md
+            summary.json
+
+      - name: Upsert PR comment
+        if: >-
+          github.event_name == 'pull_request' &&
+          (inputs.comment_mode == 'always' ||
+          (inputs.comment_mode == 'on-regression' && steps.render.outputs.has_regressions == 'true'))
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: report.md
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- iai-callgrind-bench -->';
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            const body = `${marker}\n${report}`;
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+            }
+
+      - name: Fail on regression
+        if: inputs.fail_on_regression && steps.render.outputs.has_regressions == 'true'
+        run: |
+          echo "Detected benchmark regressions above threshold."
+          exit 1

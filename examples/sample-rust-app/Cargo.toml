@@ -1,0 +1,17 @@
+[package]
+name = "sample-rust-app"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+alt-impl = []
+
+[dependencies]
+
+[dev-dependencies]
+iai-callgrind = "0.16.1"
+
+[[bench]]
+name = "sample_bench"
+harness = false
