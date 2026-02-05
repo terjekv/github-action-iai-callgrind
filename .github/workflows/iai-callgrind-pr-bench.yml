@@ -137,6 +137,12 @@ jobs:
         with:
           toolchain: ${{ inputs.toolchain }}
 
+      - name: Ensure iai-callgrind runner is available
+        run: |
+          if ! command -v iai-callgrind-runner >/dev/null 2>&1; then
+            cargo install --locked iai-callgrind-runner
+          fi
+
       - name: Ensure valgrind is available
         run: |
           if ! command -v valgrind >/dev/null 2>&1; then
