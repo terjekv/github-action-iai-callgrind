@@ -170,13 +170,11 @@ jobs:
       - name: Ensure iai-callgrind runner is available
         run: |
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
           if ! command -v iai-callgrind-runner >/dev/null 2>&1; then
             cargo install --locked iai-callgrind-runner
           fi
 
           echo "IAI_CALLGRIND_RUNNER=$(command -v iai-callgrind-runner)" >> "$GITHUB_ENV"
-
       - name: Ensure valgrind is available
         run: |
           if ! command -v valgrind >/dev/null 2>&1; then
