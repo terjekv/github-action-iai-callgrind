@@ -219,14 +219,64 @@ jobs:
           pattern: bench-result-*
           path: artifacts
 
+      - name: Load PR history
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          HISTORY_PATH: history.json
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- iai-callgrind-bench -->';
+            const historyRegex = /<!-- iai-callgrind-history: ([\s\S]*?) -->/;
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (!existing || !existing.body) {
+              return;
+            }
+
+            const match = existing.body.match(historyRegex);
+            if (!match) {
+              return;
+            }
+
+            try {
+              const payload = JSON.parse(match[1]);
+              fs.writeFileSync(process.env.HISTORY_PATH, JSON.stringify(payload));
+            } catch (error) {
+              core.info(`Failed to parse history JSON: ${error}`);
+            }
+
       - name: Render report
         id: render
         run: |
+          RUN_AT="$(date -u +"%Y-%m-%d %H:%M UTC")"
+          HISTORY_ARG=""
+          if [ -f history.json ]; then
+            HISTORY_ARG="--history-input history.json"
+          fi
+          PR_ARG=""
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            PR_ARG="--pr-number ${{ github.event.pull_request.number }}"
+          fi
+
           python3 action-src/scripts/render_report.py \
             --artifacts-dir artifacts \
             --threshold "${{ inputs.regression_threshold_pct }}" \
             --markdown-output report.md \
-            --summary-output summary.json
+            --summary-output summary.json \
+            --head-sha "${{ github.sha }}" \
+            --run-at "$RUN_AT" \
+            --max-history 10 \
+            $HISTORY_ARG \
+            $PR_ARG
 
           cat report.md >> "$GITHUB_STEP_SUMMARY"
           echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
