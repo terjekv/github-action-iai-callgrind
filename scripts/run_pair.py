@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import time
 from typing import Any
@@ -75,13 +76,65 @@ def collect_metrics(target_dir: pathlib.Path, start_ns: int, before_paths: set[s
     return {"total": total, "metrics": metrics}
 
 
+def detect_missing_bench(command: str, cwd: pathlib.Path) -> str | None:
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return None
+
+    if not parts or parts[0] != "cargo":
+        return None
+    if "bench" not in parts:
+        return None
+    if "--bench" not in parts:
+        return None
+    if "--manifest-path" in parts or "--package" in parts or "-p" in parts:
+        return None
+
+    bench_index = parts.index("--bench") + 1
+    if bench_index >= len(parts):
+        return None
+    bench_name = parts[bench_index]
+    bench_path = cwd / "benches" / f"{bench_name}.rs"
+    if not bench_path.exists():
+        return f"missing bench file {bench_path.as_posix()}"
+    return None
+
+
+def is_missing_bench_error(output: str) -> bool:
+    lowered = output.lower()
+    return (
+        "no bench target named" in lowered
+        or "could not find bench" in lowered
+        or "no benchmark target named" in lowered
+    )
+
+
 def run_command(command: str, cwd: pathlib.Path, target_dir: pathlib.Path) -> dict[str, Any]:
+    missing_reason = detect_missing_bench(command, cwd)
+    if missing_reason:
+        return {"total": 0, "metrics": [], "missing": True, "missing_reason": missing_reason}
+
     before = {str(path) for path in scan_callgrind_files(target_dir)}
     start_ns = time.time_ns()
     env = os.environ.copy()
     env["CARGO_TARGET_DIR"] = str(target_dir)
 
-    subprocess.run(command, shell=True, cwd=cwd, check=True, env=env)
+    try:
+        subprocess.run(
+            command,
+            shell=True,
+            cwd=cwd,
+            check=True,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        output = (exc.stdout or "") + "\n" + (exc.stderr or "")
+        if is_missing_bench_error(output):
+            return {"total": 0, "metrics": [], "missing": True, "missing_reason": "bench target not found"}
+        raise
     return collect_metrics(target_dir, start_ns, before)
 
 
@@ -120,10 +173,14 @@ def main() -> int:
 
     git_checkout(repo_path, args.head_sha)
 
-    base_total = base["total"]
-    head_total = head["total"]
-    delta = head_total - base_total
-    delta_pct = ((delta / base_total) * 100.0) if base_total else 0.0
+    base_total = base.get("total", 0)
+    head_total = head.get("total", 0)
+    if base.get("missing") or head.get("missing"):
+        delta = 0
+        delta_pct = float("nan")
+    else:
+        delta = head_total - base_total
+        delta_pct = ((delta / base_total) * 100.0) if base_total else 0.0
 
     result = {
         "benchmark_name": args.benchmark_name,
@@ -135,6 +192,10 @@ def main() -> int:
         "delta_pct": delta_pct,
         "head_metrics": head["metrics"],
         "base_metrics": base["metrics"],
+        "head_missing": bool(head.get("missing")),
+        "base_missing": bool(base.get("missing")),
+        "head_missing_reason": head.get("missing_reason"),
+        "base_missing_reason": base.get("missing_reason"),
     }
 
     pathlib.Path(args.output).write_text(json.dumps(result, indent=2), encoding="utf-8")
