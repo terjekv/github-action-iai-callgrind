@@ -109,6 +109,16 @@ def is_missing_bench_error(output: str) -> bool:
         or "no benchmark target named" in lowered
     )
 
+def is_missing_feature_error(output: str) -> bool:
+    lowered = output.lower()
+    return (
+        "does not have the feature" in lowered
+        or "does not have these features" in lowered
+        or "unknown feature" in lowered
+        or "feature `" in lowered and " is not defined" in lowered
+        or "no such feature" in lowered
+    )
+
 
 def run_command(command: str, cwd: pathlib.Path, target_dir: pathlib.Path) -> dict[str, Any]:
     missing_reason = detect_missing_bench(command, cwd)
@@ -134,6 +144,8 @@ def run_command(command: str, cwd: pathlib.Path, target_dir: pathlib.Path) -> di
         output = (exc.stdout or "") + "\n" + (exc.stderr or "")
         if is_missing_bench_error(output):
             return {"total": 0, "metrics": [], "missing": True, "missing_reason": "bench target not found"}
+        if is_missing_feature_error(output):
+            return {"total": 0, "metrics": [], "missing": True, "missing_reason": "feature not available"}
         raise
     return collect_metrics(target_dir, start_ns, before)
 
