@@ -146,7 +146,13 @@ def run_command(command: str, cwd: pathlib.Path, target_dir: pathlib.Path) -> di
             return {"total": 0, "metrics": [], "missing": True, "missing_reason": "bench target not found"}
         if is_missing_feature_error(output):
             return {"total": 0, "metrics": [], "missing": True, "missing_reason": "feature not available"}
-        raise
+        return {
+            "total": 0,
+            "metrics": [],
+            "error": True,
+            "error_code": exc.returncode,
+            "error_output": output.strip(),
+        }
     return collect_metrics(target_dir, start_ns, before)
 
 
@@ -187,7 +193,7 @@ def main() -> int:
 
     base_total = base.get("total", 0)
     head_total = head.get("total", 0)
-    if base.get("missing") or head.get("missing"):
+    if base.get("missing") or head.get("missing") or base.get("error") or head.get("error"):
         delta = 0
         delta_pct = float("nan")
     else:
@@ -208,9 +214,30 @@ def main() -> int:
         "base_missing": bool(base.get("missing")),
         "head_missing_reason": head.get("missing_reason"),
         "base_missing_reason": base.get("missing_reason"),
+        "head_error": bool(head.get("error")),
+        "base_error": bool(base.get("error")),
+        "head_error_code": head.get("error_code"),
+        "base_error_code": base.get("error_code"),
+        "head_error_output": head.get("error_output"),
+        "base_error_output": base.get("error_output"),
     }
 
     pathlib.Path(args.output).write_text(json.dumps(result, indent=2), encoding="utf-8")
+    if head.get("error") or base.get("error"):
+        def emit_error(label: str, data: dict[str, Any]) -> None:
+            if not data.get("error"):
+                return
+            output = data.get("error_output") or ""
+            if not output:
+                return
+            lines = output.splitlines()[:20]
+            print(f"[{label}] command failed; first {len(lines)} lines of output:")
+            for line in lines:
+                print(line)
+
+        emit_error("head", head)
+        emit_error("base", base)
+        return 1
     return 0
 
 
