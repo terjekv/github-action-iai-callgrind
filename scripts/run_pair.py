@@ -120,6 +120,11 @@ def is_missing_feature_error(output: str) -> bool:
     )
 
 
+def is_iai_version_mismatch_error(output: str) -> bool:
+    lowered = output.lower()
+    return "iai-callgrind-runner" in lowered and "is newer than iai-callgrind" in lowered
+
+
 def run_command(command: str, cwd: pathlib.Path, target_dir: pathlib.Path) -> dict[str, Any]:
     missing_reason = detect_missing_bench(command, cwd)
     if missing_reason:
@@ -146,12 +151,16 @@ def run_command(command: str, cwd: pathlib.Path, target_dir: pathlib.Path) -> di
             return {"total": 0, "metrics": [], "missing": True, "missing_reason": "bench target not found"}
         if is_missing_feature_error(output):
             return {"total": 0, "metrics": [], "missing": True, "missing_reason": "feature not available"}
+        error_reason = None
+        if is_iai_version_mismatch_error(output):
+            error_reason = "iai-callgrind version mismatch"
         return {
             "total": 0,
             "metrics": [],
             "error": True,
             "error_code": exc.returncode,
             "error_output": output.strip(),
+            "error_reason": error_reason,
         }
     return collect_metrics(target_dir, start_ns, before)
 
@@ -218,6 +227,8 @@ def main() -> int:
         "base_error": bool(base.get("error")),
         "head_error_code": head.get("error_code"),
         "base_error_code": base.get("error_code"),
+        "head_error_reason": head.get("error_reason"),
+        "base_error_reason": base.get("error_reason"),
         "head_error_output": head.get("error_output"),
         "base_error_output": base.get("error_output"),
     }
@@ -232,6 +243,12 @@ def main() -> int:
             output = data.get("error_output") or ""
             if not output:
                 return
+            reason = data.get("error_reason")
+            if reason == "iai-callgrind version mismatch":
+                print(
+                    f"[{label}] error: iai-callgrind-runner is newer than the crate. "
+                    "Update the repo's iai-callgrind dependency to match the runner version."
+                )
             log_path = output_dir / f"{label}.error.log"
             log_path.write_text(output, encoding="utf-8")
             print(f"[{label}] command failed; full output:")
