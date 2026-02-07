@@ -224,16 +224,19 @@ def main() -> int:
 
     pathlib.Path(args.output).write_text(json.dumps(result, indent=2), encoding="utf-8")
     if head.get("error") or base.get("error"):
+        output_dir = pathlib.Path(args.output).resolve().parent
+
         def emit_error(label: str, data: dict[str, Any]) -> None:
             if not data.get("error"):
                 return
             output = data.get("error_output") or ""
             if not output:
                 return
-            lines = output.splitlines()[:20]
-            print(f"[{label}] command failed; first {len(lines)} lines of output:")
-            for line in lines:
-                print(line)
+            log_path = output_dir / f"{label}.error.log"
+            log_path.write_text(output, encoding="utf-8")
+            print(f"[{label}] command failed; full output:")
+            print(output)
+            print(f"[{label}] full output written to {log_path.as_posix()}")
 
         emit_error("head", head)
         emit_error("base", base)
