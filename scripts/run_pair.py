@@ -114,6 +114,8 @@ def is_missing_feature_error(output: str) -> bool:
     return (
         "does not have the feature" in lowered
         or "does not have these features" in lowered
+        or "does not contain this feature" in lowered
+        or "does not contain these features" in lowered
         or "unknown feature" in lowered
         or "feature `" in lowered and " is not defined" in lowered
         or "no such feature" in lowered
