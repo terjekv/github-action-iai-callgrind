@@ -14,10 +14,10 @@ Reusable GitHub workflow for benchmarking Rust PRs with `iai-callgrind`, `criter
 
 Use:
 
-`your-org/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1`
+`terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1`
 
 Compatibility path (deprecated but supported):
-`your-org/github-action-iai-callgrind/.github/workflows/iai-callgrind-pr-bench.yml@v1`
+`terjekv/github-action-iai-callgrind/.github/workflows/iai-callgrind-pr-bench.yml@v1`
 
 ### Example caller workflow
 
@@ -29,7 +29,7 @@ on:
 
 jobs:
   bench-callgrind:
-    uses: your-org/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
     with:
       backend: iai-callgrind
       auto_discover: true
@@ -42,7 +42,7 @@ jobs:
       fail_on_regression: true
 
   bench-criterion:
-    uses: your-org/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
     with:
       backend: criterion
       auto_discover: true
@@ -52,7 +52,7 @@ jobs:
       fail_on_regression: false
 
   bench-all:
-    uses: your-org/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
     with:
       backend: all
       auto_discover: true
