@@ -1,0 +1,47 @@
+import pathlib
+import unittest
+
+from testlib import REPO_ROOT
+
+
+def extract_job_block(workflow_text: str, job_name: str) -> str:
+    lines = workflow_text.splitlines()
+    in_jobs = False
+    collecting = False
+    block: list[str] = []
+
+    for line in lines:
+        if not in_jobs:
+            if line == "jobs:":
+                in_jobs = True
+            continue
+
+        if not collecting:
+            if line == f"  {job_name}:":
+                collecting = True
+                block.append(line)
+            continue
+
+        if line.startswith("  ") and not line.startswith("    "):
+            break
+        block.append(line)
+
+    if not block:
+        raise AssertionError(f"job '{job_name}' not found")
+    return "\n".join(block)
+
+
+class WorkflowContractTests(unittest.TestCase):
+    def test_report_job_directly_depends_on_prepare_matrix(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
+            encoding="utf-8"
+        )
+        report_block = extract_job_block(workflow, "report")
+
+        self.assertIn("    needs:", report_block)
+        self.assertIn("      - prepare-matrix", report_block)
+        self.assertIn("      - benchmark", report_block)
+
+
+if __name__ == "__main__":
+    unittest.main()

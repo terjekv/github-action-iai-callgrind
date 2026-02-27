@@ -258,7 +258,9 @@ jobs:
 
   report:
     runs-on: ubuntu-latest
-    needs: benchmark
+    needs:
+      - prepare-matrix
+      - benchmark
     outputs:
       has_regressions: ${{ steps.render_overall.outputs.has_regressions }}
 
