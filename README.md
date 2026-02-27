@@ -136,7 +136,7 @@ You can override this by either:
 
 This repository includes a sample Rust project at `examples/sample-rust-app`.
 
-- It has an `iai-callgrind` benchmark target: `sample_bench`.
+- It has an `iai-callgrind` benchmark target: `sample_callgrind_bench`.
 - It has a `criterion` benchmark target: `sample_criterion_bench`.
 - It defines two feature sets: `default` and `alt-impl`.
-- The workflow `.github/workflows/sample-self-test.yml` first runs clippy, then calls the reusable workflow in `backend: all` mode to validate both backends end-to-end on pull requests.
+- The workflow `.github/workflows/sample-self-test.yml` runs fast script/unit tests first, then validates explicit callgrind, explicit criterion, combined `backend: all`, and autodiscovery modes against the sample fixture on pull requests.
