@@ -14,10 +14,10 @@ Reusable GitHub workflow for benchmarking Rust PRs with `iai-callgrind`, `criter
 
 Use:
 
-`terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1`
+`terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2`
 
 Compatibility path (deprecated but supported):
-`terjekv/github-action-iai-callgrind/.github/workflows/iai-callgrind-pr-bench.yml@v1`
+`terjekv/github-action-iai-callgrind/.github/workflows/iai-callgrind-pr-bench.yml@v2`
 
 ### Example caller workflows
 
@@ -35,7 +35,7 @@ on:
 
 jobs:
   bench:
-    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2
     with:
       backend: all
       auto_discover: true
@@ -62,7 +62,7 @@ on:
 
 jobs:
   bench:
-    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2
     with:
       backend: criterion
       auto_discover: true
@@ -84,7 +84,7 @@ on:
 
 jobs:
   bench:
-    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2
     with:
       backend: iai-callgrind
       auto_discover: true
@@ -109,7 +109,7 @@ on:
 
 jobs:
   bench:
-    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2
     with:
       backend: all
       working_directory: crates/engine

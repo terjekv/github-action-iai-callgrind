@@ -7,6 +7,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+Changelog tracking formally starts with `2.0.0`. Earlier releases, including `v1`, were not backfilled here.
+
+## [2.0.0] - 2026-02-27
+
 ### Added
 
 - Added Criterion benchmark support alongside `iai-callgrind`.
