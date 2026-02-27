@@ -19,7 +19,13 @@ Use:
 Compatibility path (deprecated but supported):
 `terjekv/github-action-iai-callgrind/.github/workflows/iai-callgrind-pr-bench.yml@v1`
 
-### Example caller workflow
+### Example caller workflows
+
+Most consumers will use one of these patterns at a time.
+
+#### 1. Run both backends in one job
+
+Best when you want one consolidated PR comment and one benchmark status check.
 
 ```yaml
 name: PR Bench
@@ -28,7 +34,56 @@ on:
   pull_request:
 
 jobs:
-  bench-callgrind:
+  bench:
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
+    with:
+      backend: all
+      auto_discover: true
+      criterion_statistic: median
+      feature_sets_json: >-
+        [
+          {"name":"default","features":""},
+          {"name":"simd","features":"simd"}
+        ]
+      regression_threshold_pct_iai_callgrind: 3
+      regression_threshold_pct_criterion: 10
+      fail_on_regression: true
+```
+
+#### 2. Criterion only, with tuned sampling
+
+Best when wall-clock benchmarking is what you care about and you want to tune Criterion's CLI settings.
+
+```yaml
+name: Criterion Bench
+
+on:
+  pull_request:
+
+jobs:
+  bench:
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
+    with:
+      backend: criterion
+      auto_discover: true
+      criterion_cli_args: "--noplot --sample-size 80 --measurement-time 6"
+      criterion_statistic: median
+      regression_threshold_pct_criterion: 10
+      fail_on_regression: true
+```
+
+#### 3. Callgrind only, for instruction-level regression gating
+
+Best when you want stricter deterministic gating on callgrind event counts.
+
+```yaml
+name: Callgrind Bench
+
+on:
+  pull_request:
+
+jobs:
+  bench:
     uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
     with:
       backend: iai-callgrind
@@ -38,26 +93,36 @@ jobs:
           {"name":"default","features":""},
           {"name":"simd","features":"simd"}
         ]
-      regression_threshold_pct: 3
+      regression_threshold_pct_iai_callgrind: 3
       fail_on_regression: true
+```
 
-  bench-criterion:
-    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
-    with:
-      backend: criterion
-      auto_discover: true
-      criterion_cli_args: "--noplot --sample-size 80 --measurement-time 6"
-      criterion_statistic: median
-      regression_threshold_pct: 10
-      fail_on_regression: false
+#### 4. Explicit benchmark list for a workspace member or mixed setup
 
-  bench-all:
+Best when autodiscovery is not enough, or when each backend should target a different bench binary.
+
+```yaml
+name: Explicit Bench Setup
+
+on:
+  pull_request:
+
+jobs:
+  bench:
     uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v1
     with:
       backend: all
-      auto_discover: true
-      criterion_statistic: median
-      regression_threshold_pct_iai_callgrind: 3
+      working_directory: crates/engine
+      benchmarks_json: >-
+        [
+          {"name":"parser_callgrind","bench":"parser_callgrind","backend":"iai-callgrind"},
+          {"name":"parser_criterion","bench":"parser_criterion","backend":"criterion","criterion_args":"--noplot --sample-size 50"}
+        ]
+      feature_sets_json: >-
+        [
+          {"name":"default","features":""},
+          {"name":"serde","features":"serde"}
+        ]
       regression_threshold_pct_criterion: 10
 ```
 
@@ -114,6 +179,31 @@ You can override this by either:
 - Setting `working_directory` for workspace/member layouts.
 - Providing explicit `benchmarks_json` entries.
 - Using `command` in a benchmark spec for custom invocation.
+
+## Benchmark autodiscovery
+
+When `benchmarks_json` is empty and `auto_discover: true`, the workflow scans `benches/*.rs`.
+
+Backend routing is based on the benchmark filename:
+
+- contains `criterion` and not `callgrind` => Criterion only
+- contains `callgrind` and not `criterion` => IAI-Callgrind only
+- contains neither => included for both backends
+
+Examples:
+
+- `parser_callgrind.rs` => IAI-Callgrind only
+- `parser_criterion.rs` => Criterion only
+- `parser.rs` => both backends
+
+This lets a repo keep both benchmark styles in one `benches/` directory while still routing them predictably.
+
+Use explicit `benchmarks_json` instead of autodiscovery when:
+
+- the bench target names should not follow the filename convention
+- different backends need different command lines
+- benchmarks live outside the default `benches/` layout
+- only a subset of benches should run in CI
 
 ## Notes
 
