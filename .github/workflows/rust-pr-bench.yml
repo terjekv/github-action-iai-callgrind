@@ -435,7 +435,7 @@ jobs:
       - name: Upload report artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bench-report
+          name: bench-report-${{ inputs.backend }}
           path: |
             report-*.md
             summary-*.json
