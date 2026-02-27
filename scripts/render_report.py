@@ -4,7 +4,10 @@ import json
 import math
 import pathlib
 from collections import defaultdict
+from string import Template
 from typing import Any, Iterable
+
+TEMPLATE_DIR = pathlib.Path(__file__).resolve().parent / "templates"
 
 
 def load_results(artifacts_dir: pathlib.Path) -> list[dict[str, Any]]:
@@ -27,8 +30,46 @@ def classify(delta_pct: float, threshold: float) -> tuple[str, bool]:
     return ("⚪ neutral", False)
 
 
-def fmt_int(value: int) -> str:
-    return f"{value:,}"
+def normalize_backend(raw: str) -> str:
+    value = str(raw).strip().lower()
+    if value in {"iai", "iai-callgrind", "callgrind"}:
+        return "iai-callgrind"
+    if value in {"criterion"}:
+        return "criterion"
+    return "iai-callgrind"
+
+
+def backend_title(backend: str) -> str:
+    if backend == "criterion":
+        return "Criterion Benchmark Report"
+    return "IAI-Callgrind Benchmark Report"
+
+
+def build_run_meta_block(pr_number: int | None, run_at: str | None, head_sha: str | None) -> str:
+    if pr_number is None and not run_at and not head_sha:
+        return ""
+    pr_part = f"PR: #{pr_number}" if pr_number is not None else "PR: n/a"
+    run_part = f"Latest: {run_at}" if run_at else "Latest: n/a"
+    head_part = f"Head: {head_sha[:7]}" if head_sha else "Head: n/a"
+    return f"{pr_part} • {run_part} • {head_part}\n"
+
+
+def load_template_text(default_filename: str, template_path: str | None) -> str:
+    if template_path:
+        path = pathlib.Path(template_path).resolve()
+    else:
+        path = TEMPLATE_DIR / default_filename
+    return path.read_text(encoding="utf-8")
+
+
+def fmt_number(value: float | int) -> str:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return "n/a"
+    rounded = round(numeric)
+    if abs(numeric - rounded) < 1e-9:
+        return f"{int(rounded):,}"
+    return f"{numeric:,.2f}"
 
 
 def fmt_pct(value: float) -> str:
@@ -41,8 +82,8 @@ def fmt_pct_or_na(value: float | None) -> str:
     return fmt_pct(value)
 
 
-def metric_delta(base_value: int, head_value: int) -> float:
-    if base_value == 0:
+def metric_delta(base_value: float, head_value: float) -> float:
+    if base_value == 0.0:
         return 0.0 if head_value == 0 else float("inf")
     return ((head_value - base_value) / base_value) * 100.0
 
@@ -55,8 +96,8 @@ def avg(values: Iterable[float]) -> float | None:
 
 
 def collect_metric_deltas(entry: dict[str, Any]) -> list[float]:
-    base_metrics = {item["metric"]: int(item["value"]) for item in entry.get("base_metrics", [])}
-    head_metrics = {item["metric"]: int(item["value"]) for item in entry.get("head_metrics", [])}
+    base_metrics = {item["metric"]: float(item["value"]) for item in entry.get("base_metrics", [])}
+    head_metrics = {item["metric"]: float(item["value"]) for item in entry.get("head_metrics", [])}
     metric_names = set(base_metrics.keys()) | set(head_metrics.keys())
     deltas: list[float] = []
     for metric_name in metric_names:
@@ -118,8 +159,8 @@ def render_metric_breakdown(entry: dict[str, Any], threshold: float) -> list[str
         lines.append("</details>")
         return lines
 
-    base_metrics = {item["metric"]: int(item["value"]) for item in entry.get("base_metrics", [])}
-    head_metrics = {item["metric"]: int(item["value"]) for item in entry.get("head_metrics", [])}
+    base_metrics = {item["metric"]: float(item["value"]) for item in entry.get("base_metrics", [])}
+    head_metrics = {item["metric"]: float(item["value"]) for item in entry.get("head_metrics", [])}
     metric_names = sorted(set(base_metrics.keys()) | set(head_metrics.keys()))
     short_metric_names = make_unique_metric_labels(metric_names)
 
@@ -137,8 +178,8 @@ def render_metric_breakdown(entry: dict[str, Any], threshold: float) -> list[str
         lines.append(
             "| {metric} | {base} | {head} | {delta} | {status} |".format(
                 metric=short_metric_names[metric_name],
-                base=fmt_int(base_value),
-                head=fmt_int(head_value),
+                base=fmt_number(base_value),
+                head=fmt_number(head_value),
                 delta=fmt_pct(delta_pct) if math.isfinite(delta_pct) else "n/a",
                 status=status if math.isfinite(delta_pct) else "⚪ unknown",
             )
@@ -189,39 +230,24 @@ def make_unique_metric_labels(metric_names: list[str]) -> dict[str, str]:
 def render_markdown(
     results: list[dict[str, Any]],
     threshold: float,
+    backend: str,
     pr_number: int | None,
     head_sha: str | None,
     run_at: str | None,
     history: list[dict[str, Any]],
     max_history: int,
+    history_marker_key: str,
+    template_path: str | None,
+    summary_template_path: str | None,
+    history_template_path: str | None,
+    omit_run_meta: bool,
 ) -> tuple[str, dict[str, Any]]:
-    if not results:
-        return (
-            "## IAI-Callgrind Benchmark Report\n\nNo benchmark results were found.",
-            {"has_regressions": False, "count": 0, "latest": {}, "history": history},
-        )
-
+    backend = normalize_backend(backend)
+    comparison_statistic = "summary"
+    metric_unit = ""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for item in results:
-        grouped[item["feature_name"]].append(item)
-
     has_regressions = False
-    lines: list[str] = []
-    lines.append("## IAI-Callgrind Benchmark Report")
-    lines.append("")
-    lines.append(f"Regression threshold: **{threshold:.2f}%**")
-    if pr_number is not None or run_at or head_sha:
-        pr_part = f"PR: #{pr_number}" if pr_number is not None else "PR: n/a"
-        run_part = f"Latest: {run_at}" if run_at else "Latest: n/a"
-        head_part = f"Head: {head_sha[:7]}" if head_sha else "Head: n/a"
-        lines.append(f"{pr_part} • {run_part} • {head_part}")
-    lines.append("")
-    summary_suffix = f" • {head_sha[:7]}" if head_sha else ""
-    lines.append(f"## Summary (Latest Run{summary_suffix})")
-    lines.append("")
-    lines.append("| Feature Set | Improved | Regressions | Neutral | Avg Δ (bench) | Avg Δ (metrics) |")
-    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
-
+    summary_rows: list[str] = []
     feature_sections: list[str] = []
     total_improved = 0
     total_regressions = 0
@@ -229,98 +255,101 @@ def render_markdown(
     all_bench_deltas: list[float] = []
     all_metric_deltas: list[float] = []
 
-    for feature_name in sorted(grouped.keys()):
-        (
-            improved,
-            regressions,
-            neutral,
-            avg_bench_delta,
-            avg_metric_delta,
-            feature_has_regressions,
-        ) = compute_feature_summary(grouped[feature_name], threshold)
-        if feature_has_regressions:
-            has_regressions = True
-        total_improved += improved
-        total_regressions += regressions
-        total_neutral += neutral
-        for entry in grouped[feature_name]:
-            if entry.get("head_missing") or entry.get("base_missing"):
-                continue
-            all_bench_deltas.append(float(entry["delta_pct"]))
-            all_metric_deltas.extend(collect_metric_deltas(entry))
-        section_lines: list[str] = []
+    if results:
+        backend = normalize_backend(results[0].get("backend", backend))
+        comparison_statistic = str(results[0].get("comparison_statistic") or "summary")
+        metric_unit = str(results[0].get("metric_unit") or "")
 
-        section_lines.append(f"<details><summary><strong>{feature_name}</strong></summary>")
-        section_lines.append("")
-        section_lines.append("| Benchmark | Base | Head | Delta | Status |")
-        section_lines.append("| --- | ---: | ---: | ---: | --- |")
+        for item in results:
+            grouped[item["feature_name"]].append(item)
 
-        sorted_entries = sorted(grouped[feature_name], key=lambda e: e["benchmark_name"])
-        for entry in sorted_entries:
-            if entry.get("head_missing") or entry.get("base_missing"):
-                status = "⚪ missing"
-            else:
-                status, _ = classify(entry["delta_pct"], threshold)
-            section_lines.append(
-                "| {bench} | {base} | {head} | {delta} | {status} |".format(
-                    bench=entry["benchmark_name"],
-                    base=fmt_int(int(entry["base_total"])),
-                    head=fmt_int(int(entry["head_total"])),
-                    delta=fmt_pct_or_na(float(entry["delta_pct"])),
-                    status=status,
+        for feature_name in sorted(grouped.keys()):
+            (
+                improved,
+                regressions,
+                neutral,
+                avg_bench_delta,
+                avg_metric_delta,
+                feature_has_regressions,
+            ) = compute_feature_summary(grouped[feature_name], threshold)
+            if feature_has_regressions:
+                has_regressions = True
+            total_improved += improved
+            total_regressions += regressions
+            total_neutral += neutral
+            for entry in grouped[feature_name]:
+                if entry.get("head_missing") or entry.get("base_missing"):
+                    continue
+                all_bench_deltas.append(float(entry["delta_pct"]))
+                all_metric_deltas.extend(collect_metric_deltas(entry))
+            section_lines: list[str] = []
+
+            section_lines.append(f"<details><summary><strong>{feature_name}</strong></summary>")
+            section_lines.append("")
+            section_lines.append("| Benchmark | Base | Head | Delta | Status |")
+            section_lines.append("| --- | ---: | ---: | ---: | --- |")
+
+            sorted_entries = sorted(grouped[feature_name], key=lambda e: e["benchmark_name"])
+            for entry in sorted_entries:
+                if entry.get("head_missing") or entry.get("base_missing"):
+                    status = "⚪ missing"
+                else:
+                    status, _ = classify(entry["delta_pct"], threshold)
+                section_lines.append(
+                    "| {bench} | {base} | {head} | {delta} | {status} |".format(
+                        bench=entry["benchmark_name"],
+                        base=fmt_number(float(entry["base_total"])),
+                        head=fmt_number(float(entry["head_total"])),
+                        delta=fmt_pct_or_na(float(entry["delta_pct"])),
+                        status=status,
+                    )
+                )
+
+            section_lines.append("")
+            section_lines.append("Metric-level breakdowns:")
+            section_lines.append("")
+            for entry in sorted_entries:
+                section_lines.extend(render_metric_breakdown(entry, threshold))
+                section_lines.append("")
+
+            section_lines.append("")
+            section_lines.append("</details>")
+
+            summary_rows.append(
+                "| {feature} | {improved} | {regressions} | {neutral} | {bench_avg} | {metric_avg} |".format(
+                    feature=feature_name,
+                    improved=improved,
+                    regressions=regressions,
+                    neutral=neutral,
+                    bench_avg=fmt_pct_or_na(avg_bench_delta),
+                    metric_avg=fmt_pct_or_na(avg_metric_delta),
                 )
             )
+            feature_sections.append("\n".join(section_lines))
 
-        section_lines.append("")
-        section_lines.append("Metric-level breakdowns:")
-        section_lines.append("")
-        for entry in sorted_entries:
-            section_lines.extend(render_metric_breakdown(entry, threshold))
-            section_lines.append("")
-
-        section_lines.append("")
-        section_lines.append("</details>")
-
-        lines.append(
-            "| {feature} | {improved} | {regressions} | {neutral} | {bench_avg} | {metric_avg} |".format(
-                feature=feature_name,
-                improved=improved,
-                regressions=regressions,
-                neutral=neutral,
-                bench_avg=fmt_pct_or_na(avg_bench_delta),
-                metric_avg=fmt_pct_or_na(avg_metric_delta),
-            )
-        )
-        feature_sections.extend(section_lines)
-
-    lines.append("")
-    lines.extend(feature_sections)
-
+    regressions_block = ""
     if has_regressions:
-        lines.append("")
-        lines.append("### Regressions Above Threshold")
-        lines.append("")
+        regression_lines: list[str] = []
         for entry in sorted(results, key=lambda e: e["delta_pct"], reverse=True):
             _, is_regression = classify(entry["delta_pct"], threshold)
             if not is_regression:
                 continue
-            lines.append(
+            regression_lines.append(
                 "- `{feature}` / `{bench}`: {delta}".format(
                     feature=entry["feature_name"],
                     bench=entry["benchmark_name"],
                     delta=fmt_pct(float(entry["delta_pct"])),
                 )
             )
+        if regression_lines:
+            regressions_block = (
+                "### Regressions Above Threshold\n\n" + "\n".join(regression_lines) + "\n\n"
+            )
 
-    missing_entries = [
-        entry
-        for entry in results
-        if entry.get("head_missing") or entry.get("base_missing")
-    ]
+    missing_entries = [entry for entry in results if entry.get("head_missing") or entry.get("base_missing")]
+    missing_block = ""
     if missing_entries:
-        lines.append("")
-        lines.append("### Skipped Benchmarks (Missing in Base/Head)")
-        lines.append("")
+        missing_lines: list[str] = []
         for entry in sorted(missing_entries, key=lambda e: e["benchmark_name"]):
             reasons = []
             if entry.get("head_missing"):
@@ -328,19 +357,24 @@ def render_markdown(
             if entry.get("base_missing"):
                 reasons.append("base")
             reason_text = " & ".join(reasons) if reasons else "missing"
-            lines.append(
+            missing_lines.append(
                 "- `{feature}` / `{bench}`: missing in {reason}".format(
                     feature=entry["feature_name"],
                     bench=entry["benchmark_name"],
                     reason=reason_text,
                 )
             )
+        missing_block = (
+            "### Skipped Benchmarks (Missing in Base/Head)\n\n" + "\n".join(missing_lines) + "\n\n"
+        )
 
     avg_bench_delta_all = avg(all_bench_deltas)
     avg_metric_delta_all = avg(all_metric_deltas)
     latest_entry = {
+        "backend": backend,
         "commit": head_sha or "",
         "run_at": run_at or "",
+        "pr_number": pr_number,
         "summary": {
             "improved": total_improved,
             "regressions": total_regressions,
@@ -351,14 +385,21 @@ def render_markdown(
         "has_regressions": has_regressions,
     }
 
-    def history_key(item: dict[str, Any]) -> str:
+    def history_entry_key(item: dict[str, Any]) -> str:
+        item_backend = normalize_backend(item.get("backend", backend))
         commit = str(item.get("commit") or "")
-        return commit
+        return f"{item_backend}:{commit}"
 
-    new_history: list[dict[str, Any]] = [latest_entry]
-    seen = {history_key(latest_entry)}
+    new_history: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    if results:
+        new_history = [latest_entry]
+        seen.add(history_entry_key(latest_entry))
     for item in history:
-        key = history_key(item)
+        item_backend = normalize_backend(item.get("backend", backend))
+        if item_backend != backend:
+            continue
+        key = history_entry_key(item)
         if not key or key in seen:
             continue
         new_history.append(item)
@@ -366,11 +407,7 @@ def render_markdown(
         if len(new_history) >= max_history:
             break
 
-    lines.append("")
-    lines.append(f"## PR History (last {len(new_history)} runs)")
-    lines.append("")
-    lines.append("| Commit | Date (UTC) | Summary | Avg Δ (bench) | Avg Δ (metrics) | Regressions? |")
-    lines.append("| --- | --- | --- | ---: | ---: | --- |")
+    history_rows: list[str] = []
     for item in new_history:
         summary = item.get("summary", {})
         summary_text = "{improved} improved / {regressions} reg / {neutral} neutral".format(
@@ -378,7 +415,7 @@ def render_markdown(
             regressions=summary.get("regressions", 0),
             neutral=summary.get("neutral", 0),
         )
-        lines.append(
+        history_rows.append(
             "| {commit} | {run_at} | {summary} | {bench_avg} | {metric_avg} | {has_regressions} |".format(
                 commit=(item.get("commit") or "")[:7],
                 run_at=item.get("run_at") or "n/a",
@@ -388,31 +425,81 @@ def render_markdown(
                 has_regressions="yes" if item.get("has_regressions") else "no",
             )
         )
+    if not history_rows:
+        history_rows.append("| n/a | n/a | 0 improved / 0 reg / 0 neutral | n/a | n/a | no |")
 
     history_payload = json.dumps({"history": new_history}, separators=(",", ":"))
-    lines.append("")
-    lines.append(f"<!-- iai-callgrind-history: {history_payload} -->")
+    template = Template(load_template_text("report_single.md.tmpl", template_path))
+
+    comparison_block = ""
+    if backend == "criterion":
+        unit_text = f" ({metric_unit})" if metric_unit else ""
+        comparison_block = f"Comparison statistic: **{comparison_statistic}**{unit_text}\n"
+
+    run_meta_block = "" if omit_run_meta else build_run_meta_block(pr_number, run_at, head_sha)
+
+    summary_rows_text = "\n".join(summary_rows) if summary_rows else "| n/a | 0 | 0 | 0 | n/a | n/a |"
+    feature_sections_text = "\n\n".join(feature_sections).strip()
+    if not feature_sections_text:
+        feature_sections_text = "No benchmark results were found."
+    if feature_sections_text:
+        feature_sections_text += "\n\n"
+    history_rows_text = "\n".join(history_rows)
+    summary_suffix = f" • {head_sha[:7]}" if head_sha else ""
+    summary_section = (
+        Template(load_template_text("report_single_summary.md.tmpl", summary_template_path))
+        .safe_substitute(summary_suffix=summary_suffix, summary_rows=summary_rows_text)
+        .strip()
+        + "\n"
+    )
+    history_section = (
+        Template(load_template_text("report_single_history.md.tmpl", history_template_path))
+        .safe_substitute(history_count=str(len(new_history)), history_rows=history_rows_text)
+        .strip()
+        + "\n"
+    )
+
+    markdown = template.safe_substitute(
+        report_title=backend_title(backend),
+        threshold_text=f"{threshold:.2f}%",
+        comparison_block=comparison_block,
+        run_meta_block=run_meta_block,
+        summary_section=summary_section,
+        feature_sections=feature_sections_text,
+        regressions_block=regressions_block,
+        missing_block=missing_block,
+        history_section=history_section,
+        history_marker_key=history_marker_key,
+        history_payload=history_payload,
+    ).rstrip() + "\n"
 
     summary_payload = {
         "has_regressions": has_regressions,
         "count": len(results),
+        "backend": backend,
         "latest": latest_entry,
         "history": new_history,
     }
-    return ("\n".join(lines), summary_payload)
+    return (markdown, summary_payload)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifacts-dir", required=True)
     parser.add_argument("--threshold", required=True, type=float)
+    parser.add_argument("--backend", default="iai-callgrind")
     parser.add_argument("--markdown-output", required=True)
     parser.add_argument("--summary-output", required=True)
     parser.add_argument("--history-input")
+    parser.add_argument("--history-key", default="iai-callgrind-history")
+    parser.add_argument("--template-path")
+    parser.add_argument("--summary-template-path")
+    parser.add_argument("--history-template-path")
     parser.add_argument("--head-sha")
     parser.add_argument("--run-at")
     parser.add_argument("--pr-number", type=int)
     parser.add_argument("--max-history", type=int, default=10)
+    parser.add_argument("--omit-run-meta", action="store_true")
     args = parser.parse_args()
 
     results = load_results(pathlib.Path(args.artifacts_dir))
@@ -429,11 +516,17 @@ def main() -> int:
     markdown, summary_payload = render_markdown(
         results,
         args.threshold,
+        args.backend,
         args.pr_number,
         args.head_sha,
         args.run_at,
         history,
         args.max_history,
+        args.history_key,
+        args.template_path,
+        args.summary_template_path,
+        args.history_template_path,
+        args.omit_run_meta,
     )
 
     pathlib.Path(args.markdown_output).write_text(markdown, encoding="utf-8")

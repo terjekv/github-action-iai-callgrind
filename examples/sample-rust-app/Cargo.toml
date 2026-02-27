@@ -11,7 +11,12 @@ alt-impl = []
 
 [dev-dependencies]
 iai-callgrind = "0.16.1"
+criterion = "0.8.2"
 
 [[bench]]
-name = "sample_bench"
+name = "sample_callgrind_bench"
+harness = false
+
+[[bench]]
+name = "sample_criterion_bench"
 harness = false

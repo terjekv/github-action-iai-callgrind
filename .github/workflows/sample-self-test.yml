@@ -4,8 +4,10 @@ on:
   pull_request:
     paths:
       - ".github/workflows/iai-callgrind-pr-bench.yml"
+      - ".github/workflows/rust-pr-bench.yml"
       - ".github/workflows/sample-self-test.yml"
       - "scripts/**"
+      - "tests/**"
       - "examples/sample-rust-app/**"
 
 permissions:
@@ -13,7 +15,32 @@ permissions:
   pull-requests: write
 
 jobs:
+  script-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run Python script tests
+        run: |
+          python3 -m py_compile scripts/expand_matrix.py scripts/render_report.py scripts/compose_combined_report.py scripts/run_pair.py
+          python3 -m unittest discover -s tests -v
+
+      - name: Run JS helper tests
+        run: node --test tests/test_github_pr_comment.js
+
   clippy-sample:
+    needs: script-tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -26,13 +53,81 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
         working-directory: examples/sample-rust-app
 
-  bench-sample:
+  bench-sample-callgrind:
     needs: clippy-sample
-    uses: ./.github/workflows/iai-callgrind-pr-bench.yml
+    uses: ./.github/workflows/rust-pr-bench.yml
     with:
+      backend: iai-callgrind
       working_directory: examples/sample-rust-app
-      benchmarks_json: '["sample_bench"]'
+      benchmarks_json: >-
+        [
+          {"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"iai-callgrind"}
+        ]
       feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
-      regression_threshold_pct: 2
+      regression_threshold_pct_iai_callgrind: 2
       fail_on_regression: false
       comment_mode: always
+
+  bench-sample-criterion:
+    needs: clippy-sample
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      backend: criterion
+      working_directory: examples/sample-rust-app
+      benchmarks_json: >-
+        [
+          {"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}
+        ]
+      feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
+      criterion_cli_args: "--noplot --sample-size 30 --measurement-time 2"
+      criterion_statistic: median
+      regression_threshold_pct_criterion: 10
+      fail_on_regression: false
+      comment_mode: always
+
+  bench-sample-all:
+    needs: clippy-sample
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      backend: all
+      working_directory: examples/sample-rust-app
+      benchmarks_json: >-
+        [
+          {"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"iai-callgrind"},
+          {"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}
+        ]
+      feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
+      criterion_cli_args: "--noplot --sample-size 30 --measurement-time 2"
+      criterion_statistic: median
+      regression_threshold_pct_iai_callgrind: 2
+      regression_threshold_pct_criterion: 10
+      fail_on_regression: false
+      comment_mode: always
+
+  bench-sample-autodiscover-callgrind:
+    needs: clippy-sample
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      backend: iai-callgrind
+      working_directory: examples/sample-rust-app
+      auto_discover: true
+      benchmarks_json: "[]"
+      feature_sets_json: '[{"name":"default","features":""}]'
+      regression_threshold_pct_iai_callgrind: 2
+      fail_on_regression: false
+      comment_mode: never
+
+  bench-sample-autodiscover-criterion:
+    needs: clippy-sample
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      backend: criterion
+      working_directory: examples/sample-rust-app
+      auto_discover: true
+      benchmarks_json: "[]"
+      feature_sets_json: '[{"name":"default","features":""}]'
+      criterion_cli_args: "--noplot --sample-size 20 --measurement-time 1"
+      criterion_statistic: median
+      regression_threshold_pct_criterion: 10
+      fail_on_regression: false
+      comment_mode: never

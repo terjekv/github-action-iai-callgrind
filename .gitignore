@@ -1,2 +1,3 @@
 .iai-target/
 examples/sample-rust-app/target/
+__pycache__/
