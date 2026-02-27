@@ -45,6 +45,15 @@ def backend_title(backend: str) -> str:
     return "IAI-Callgrind Benchmark Report"
 
 
+def build_run_meta_block(pr_number: int | None, run_at: str | None, head_sha: str | None) -> str:
+    if pr_number is None and not run_at and not head_sha:
+        return ""
+    pr_part = f"PR: #{pr_number}" if pr_number is not None else "PR: n/a"
+    run_part = f"Latest: {run_at}" if run_at else "Latest: n/a"
+    head_part = f"Head: {head_sha[:7]}" if head_sha else "Head: n/a"
+    return f"{pr_part} • {run_part} • {head_part}\n"
+
+
 def load_template_text(default_filename: str, template_path: str | None) -> str:
     if template_path:
         path = pathlib.Path(template_path).resolve()
@@ -229,22 +238,14 @@ def render_markdown(
     max_history: int,
     history_marker_key: str,
     template_path: str | None,
+    summary_template_path: str | None,
+    history_template_path: str | None,
+    omit_run_meta: bool,
 ) -> tuple[str, dict[str, Any]]:
     backend = normalize_backend(backend)
-    if not results:
-        return (
-            f"## {backend_title(backend)}\n\nNo benchmark results were found.",
-            {"has_regressions": False, "count": 0, "latest": {}, "history": history, "backend": backend},
-        )
-
-    backend = normalize_backend(results[0].get("backend", backend))
-    comparison_statistic = str(results[0].get("comparison_statistic") or "summary")
-    metric_unit = str(results[0].get("metric_unit") or "")
-
+    comparison_statistic = "summary"
+    metric_unit = ""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for item in results:
-        grouped[item["feature_name"]].append(item)
-
     has_regressions = False
     summary_rows: list[str] = []
     feature_sections: list[str] = []
@@ -254,69 +255,77 @@ def render_markdown(
     all_bench_deltas: list[float] = []
     all_metric_deltas: list[float] = []
 
-    for feature_name in sorted(grouped.keys()):
-        (
-            improved,
-            regressions,
-            neutral,
-            avg_bench_delta,
-            avg_metric_delta,
-            feature_has_regressions,
-        ) = compute_feature_summary(grouped[feature_name], threshold)
-        if feature_has_regressions:
-            has_regressions = True
-        total_improved += improved
-        total_regressions += regressions
-        total_neutral += neutral
-        for entry in grouped[feature_name]:
-            if entry.get("head_missing") or entry.get("base_missing"):
-                continue
-            all_bench_deltas.append(float(entry["delta_pct"]))
-            all_metric_deltas.extend(collect_metric_deltas(entry))
-        section_lines: list[str] = []
+    if results:
+        backend = normalize_backend(results[0].get("backend", backend))
+        comparison_statistic = str(results[0].get("comparison_statistic") or "summary")
+        metric_unit = str(results[0].get("metric_unit") or "")
 
-        section_lines.append(f"<details><summary><strong>{feature_name}</strong></summary>")
-        section_lines.append("")
-        section_lines.append("| Benchmark | Base | Head | Delta | Status |")
-        section_lines.append("| --- | ---: | ---: | ---: | --- |")
+        for item in results:
+            grouped[item["feature_name"]].append(item)
 
-        sorted_entries = sorted(grouped[feature_name], key=lambda e: e["benchmark_name"])
-        for entry in sorted_entries:
-            if entry.get("head_missing") or entry.get("base_missing"):
-                status = "⚪ missing"
-            else:
-                status, _ = classify(entry["delta_pct"], threshold)
-            section_lines.append(
-                "| {bench} | {base} | {head} | {delta} | {status} |".format(
-                    bench=entry["benchmark_name"],
-                    base=fmt_number(float(entry["base_total"])),
-                    head=fmt_number(float(entry["head_total"])),
-                    delta=fmt_pct_or_na(float(entry["delta_pct"])),
-                    status=status,
+        for feature_name in sorted(grouped.keys()):
+            (
+                improved,
+                regressions,
+                neutral,
+                avg_bench_delta,
+                avg_metric_delta,
+                feature_has_regressions,
+            ) = compute_feature_summary(grouped[feature_name], threshold)
+            if feature_has_regressions:
+                has_regressions = True
+            total_improved += improved
+            total_regressions += regressions
+            total_neutral += neutral
+            for entry in grouped[feature_name]:
+                if entry.get("head_missing") or entry.get("base_missing"):
+                    continue
+                all_bench_deltas.append(float(entry["delta_pct"]))
+                all_metric_deltas.extend(collect_metric_deltas(entry))
+            section_lines: list[str] = []
+
+            section_lines.append(f"<details><summary><strong>{feature_name}</strong></summary>")
+            section_lines.append("")
+            section_lines.append("| Benchmark | Base | Head | Delta | Status |")
+            section_lines.append("| --- | ---: | ---: | ---: | --- |")
+
+            sorted_entries = sorted(grouped[feature_name], key=lambda e: e["benchmark_name"])
+            for entry in sorted_entries:
+                if entry.get("head_missing") or entry.get("base_missing"):
+                    status = "⚪ missing"
+                else:
+                    status, _ = classify(entry["delta_pct"], threshold)
+                section_lines.append(
+                    "| {bench} | {base} | {head} | {delta} | {status} |".format(
+                        bench=entry["benchmark_name"],
+                        base=fmt_number(float(entry["base_total"])),
+                        head=fmt_number(float(entry["head_total"])),
+                        delta=fmt_pct_or_na(float(entry["delta_pct"])),
+                        status=status,
+                    )
+                )
+
+            section_lines.append("")
+            section_lines.append("Metric-level breakdowns:")
+            section_lines.append("")
+            for entry in sorted_entries:
+                section_lines.extend(render_metric_breakdown(entry, threshold))
+                section_lines.append("")
+
+            section_lines.append("")
+            section_lines.append("</details>")
+
+            summary_rows.append(
+                "| {feature} | {improved} | {regressions} | {neutral} | {bench_avg} | {metric_avg} |".format(
+                    feature=feature_name,
+                    improved=improved,
+                    regressions=regressions,
+                    neutral=neutral,
+                    bench_avg=fmt_pct_or_na(avg_bench_delta),
+                    metric_avg=fmt_pct_or_na(avg_metric_delta),
                 )
             )
-
-        section_lines.append("")
-        section_lines.append("Metric-level breakdowns:")
-        section_lines.append("")
-        for entry in sorted_entries:
-            section_lines.extend(render_metric_breakdown(entry, threshold))
-            section_lines.append("")
-
-        section_lines.append("")
-        section_lines.append("</details>")
-
-        summary_rows.append(
-            "| {feature} | {improved} | {regressions} | {neutral} | {bench_avg} | {metric_avg} |".format(
-                feature=feature_name,
-                improved=improved,
-                regressions=regressions,
-                neutral=neutral,
-                bench_avg=fmt_pct_or_na(avg_bench_delta),
-                metric_avg=fmt_pct_or_na(avg_metric_delta),
-            )
-        )
-        feature_sections.append("\n".join(section_lines))
+            feature_sections.append("\n".join(section_lines))
 
     regressions_block = ""
     if has_regressions:
@@ -337,11 +346,7 @@ def render_markdown(
                 "### Regressions Above Threshold\n\n" + "\n".join(regression_lines) + "\n\n"
             )
 
-    missing_entries = [
-        entry
-        for entry in results
-        if entry.get("head_missing") or entry.get("base_missing")
-    ]
+    missing_entries = [entry for entry in results if entry.get("head_missing") or entry.get("base_missing")]
     missing_block = ""
     if missing_entries:
         missing_lines: list[str] = []
@@ -369,6 +374,7 @@ def render_markdown(
         "backend": backend,
         "commit": head_sha or "",
         "run_at": run_at or "",
+        "pr_number": pr_number,
         "summary": {
             "improved": total_improved,
             "regressions": total_regressions,
@@ -384,8 +390,11 @@ def render_markdown(
         commit = str(item.get("commit") or "")
         return f"{item_backend}:{commit}"
 
-    new_history: list[dict[str, Any]] = [latest_entry]
-    seen = {history_entry_key(latest_entry)}
+    new_history: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    if results:
+        new_history = [latest_entry]
+        seen.add(history_entry_key(latest_entry))
     for item in history:
         item_backend = normalize_backend(item.get("backend", backend))
         if item_backend != backend:
@@ -416,6 +425,8 @@ def render_markdown(
                 has_regressions="yes" if item.get("has_regressions") else "no",
             )
         )
+    if not history_rows:
+        history_rows.append("| n/a | n/a | 0 improved / 0 reg / 0 neutral | n/a | n/a | no |")
 
     history_payload = json.dumps({"history": new_history}, separators=(",", ":"))
     template = Template(load_template_text("report_single.md.tmpl", template_path))
@@ -425,27 +436,24 @@ def render_markdown(
         unit_text = f" ({metric_unit})" if metric_unit else ""
         comparison_block = f"Comparison statistic: **{comparison_statistic}**{unit_text}\n"
 
-    run_meta_block = ""
-    if pr_number is not None or run_at or head_sha:
-        pr_part = f"PR: #{pr_number}" if pr_number is not None else "PR: n/a"
-        run_part = f"Latest: {run_at}" if run_at else "Latest: n/a"
-        head_part = f"Head: {head_sha[:7]}" if head_sha else "Head: n/a"
-        run_meta_block = f"{pr_part} • {run_part} • {head_part}\n"
+    run_meta_block = "" if omit_run_meta else build_run_meta_block(pr_number, run_at, head_sha)
 
     summary_rows_text = "\n".join(summary_rows) if summary_rows else "| n/a | 0 | 0 | 0 | n/a | n/a |"
     feature_sections_text = "\n\n".join(feature_sections).strip()
+    if not feature_sections_text:
+        feature_sections_text = "No benchmark results were found."
     if feature_sections_text:
         feature_sections_text += "\n\n"
     history_rows_text = "\n".join(history_rows)
     summary_suffix = f" • {head_sha[:7]}" if head_sha else ""
     summary_section = (
-        Template(load_template_text("report_single_summary.md.tmpl", None))
+        Template(load_template_text("report_single_summary.md.tmpl", summary_template_path))
         .safe_substitute(summary_suffix=summary_suffix, summary_rows=summary_rows_text)
         .strip()
         + "\n"
     )
     history_section = (
-        Template(load_template_text("report_single_history.md.tmpl", None))
+        Template(load_template_text("report_single_history.md.tmpl", history_template_path))
         .safe_substitute(history_count=str(len(new_history)), history_rows=history_rows_text)
         .strip()
         + "\n"
@@ -485,10 +493,13 @@ def main() -> int:
     parser.add_argument("--history-input")
     parser.add_argument("--history-key", default="iai-callgrind-history")
     parser.add_argument("--template-path")
+    parser.add_argument("--summary-template-path")
+    parser.add_argument("--history-template-path")
     parser.add_argument("--head-sha")
     parser.add_argument("--run-at")
     parser.add_argument("--pr-number", type=int)
     parser.add_argument("--max-history", type=int, default=10)
+    parser.add_argument("--omit-run-meta", action="store_true")
     args = parser.parse_args()
 
     results = load_results(pathlib.Path(args.artifacts_dir))
@@ -513,6 +524,9 @@ def main() -> int:
         args.max_history,
         args.history_key,
         args.template_path,
+        args.summary_template_path,
+        args.history_template_path,
+        args.omit_run_meta,
     )
 
     pathlib.Path(args.markdown_output).write_text(markdown, encoding="utf-8")

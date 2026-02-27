@@ -36,17 +36,13 @@ def normalize_report_body(report_path: pathlib.Path) -> str:
     return "\n".join(shift_heading_depth(lines, 1)).strip()
 
 
-def extract_run_meta_line(body: str) -> tuple[str | None, str]:
-    lines = body.splitlines()
-    remaining: list[str] = []
-    run_meta: str | None = None
-    for line in lines:
-        stripped = line.strip()
-        if run_meta is None and stripped.startswith("PR: ") and " • " in stripped:
-            run_meta = stripped
-            continue
-        remaining.append(line)
-    return run_meta, "\n".join(remaining).strip()
+def build_run_meta_block(pr_number: int | None, run_at: str | None, head_sha: str | None) -> str:
+    if pr_number is None and not run_at and not head_sha:
+        return ""
+    pr_part = f"PR: #{pr_number}" if pr_number is not None else "PR: n/a"
+    run_part = f"Latest: {run_at}" if run_at else "Latest: n/a"
+    head_part = f"Head: {head_sha[:7]}" if head_sha else "Head: n/a"
+    return f"{pr_part} • {run_part} • {head_part}"
 
 
 def main() -> int:
@@ -56,10 +52,12 @@ def main() -> int:
     parser.add_argument("--report-criterion")
     parser.add_argument("--template-path")
     parser.add_argument("--section-template-path")
+    parser.add_argument("--pr-number", type=int)
+    parser.add_argument("--run-at")
+    parser.add_argument("--head-sha")
     args = parser.parse_args()
 
     sections: list[str] = []
-    run_meta_line: str | None = None
     section_template = Template(
         load_template_text("report_combined_backend_section.md.tmpl", args.section_template_path)
     )
@@ -67,9 +65,6 @@ def main() -> int:
         path = pathlib.Path(args.report_callgrind)
         if path.exists():
             backend_body = normalize_report_body(path)
-            extracted, backend_body = extract_run_meta_line(backend_body)
-            if run_meta_line is None and extracted:
-                run_meta_line = extracted
             sections.append(
                 section_template.safe_substitute(
                     backend_title="Callgrind",
@@ -80,9 +75,6 @@ def main() -> int:
         path = pathlib.Path(args.report_criterion)
         if path.exists():
             backend_body = normalize_report_body(path)
-            extracted, backend_body = extract_run_meta_line(backend_body)
-            if run_meta_line is None and extracted:
-                run_meta_line = extracted
             sections.append(
                 section_template.safe_substitute(
                     backend_title="Criterion",
@@ -94,6 +86,7 @@ def main() -> int:
         raise SystemExit("No backend reports were generated.")
 
     template = Template(load_template_text("report_combined.md.tmpl", args.template_path))
+    run_meta_line = build_run_meta_block(args.pr_number, args.run_at, args.head_sha)
     run_meta_block = f"{run_meta_line}\n\n" if run_meta_line else ""
     markdown = template.safe_substitute(
         run_meta_block=run_meta_block,

@@ -293,86 +293,52 @@ jobs:
         uses: actions/github-script@v7
         env:
           HISTORY_PATH: history-callgrind.json
-          PRIMARY_MARKER: "<!-- rust-pr-bench -->"
-          BENCH_MARKER: "<!-- iai-callgrind-bench -->"
+          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- iai-callgrind-bench -->"]'
           HISTORY_KEY: "iai-callgrind-history"
         with:
           script: |
-            const fs = require('fs');
-            const primaryMarker = process.env.PRIMARY_MARKER;
-            const marker = process.env.BENCH_MARKER;
-            const historyKey = process.env.HISTORY_KEY;
-            const escapedKey = historyKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const historyRegex = new RegExp(`<!-- ${escapedKey}: ([\\s\\S]*?) -->`);
-            const issue_number = context.payload.pull_request.number;
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number,
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.loadHistory({
+              github,
+              context,
+              core,
+              historyPath: process.env.HISTORY_PATH,
+              historyKey: process.env.HISTORY_KEY,
+              markers: JSON.parse(process.env.MARKERS_JSON),
             });
-
-            const existing =
-              comments.find((c) => c.body && c.body.includes(primaryMarker)) ||
-              comments.find((c) => c.body && c.body.includes(marker));
-            if (!existing || !existing.body) {
-              return;
-            }
-
-            const match = existing.body.match(historyRegex);
-            if (!match) {
-              return;
-            }
-
-            try {
-              const payload = JSON.parse(match[1]);
-              fs.writeFileSync(process.env.HISTORY_PATH, JSON.stringify(payload));
-            } catch (error) {
-              core.info(`Failed to parse history JSON: ${error}`);
-            }
 
       - name: Load Criterion PR history
         if: github.event_name == 'pull_request' && inputs.backend != 'iai-callgrind'
         uses: actions/github-script@v7
         env:
           HISTORY_PATH: history-criterion.json
-          PRIMARY_MARKER: "<!-- rust-pr-bench -->"
-          BENCH_MARKER: "<!-- criterion-bench -->"
+          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- criterion-bench -->"]'
           HISTORY_KEY: "criterion-history"
         with:
           script: |
-            const fs = require('fs');
-            const primaryMarker = process.env.PRIMARY_MARKER;
-            const marker = process.env.BENCH_MARKER;
-            const historyKey = process.env.HISTORY_KEY;
-            const escapedKey = historyKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const historyRegex = new RegExp(`<!-- ${escapedKey}: ([\\s\\S]*?) -->`);
-            const issue_number = context.payload.pull_request.number;
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number,
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.loadHistory({
+              github,
+              context,
+              core,
+              historyPath: process.env.HISTORY_PATH,
+              historyKey: process.env.HISTORY_KEY,
+              markers: JSON.parse(process.env.MARKERS_JSON),
             });
 
-            const existing =
-              comments.find((c) => c.body && c.body.includes(primaryMarker)) ||
-              comments.find((c) => c.body && c.body.includes(marker));
-            if (!existing || !existing.body) {
-              return;
-            }
+      - name: Resolve report metadata
+        id: report_meta
+        run: |
+          RUN_AT="$(date -u +"%Y-%m-%d %H:%M UTC")"
+          HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+          if [ -z "$HEAD_SHA" ]; then
+            HEAD_SHA='${{ github.sha }}'
+          fi
+          PR_NUMBER='${{ github.event.pull_request.number }}'
 
-            const match = existing.body.match(historyRegex);
-            if (!match) {
-              return;
-            }
-
-            try {
-              const payload = JSON.parse(match[1]);
-              fs.writeFileSync(process.env.HISTORY_PATH, JSON.stringify(payload));
-            } catch (error) {
-              core.info(`Failed to parse history JSON: ${error}`);
-            }
+          echo "run_at=$RUN_AT" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Render IAI-Callgrind report
         id: render_callgrind
@@ -382,18 +348,17 @@ jobs:
           if [ '${{ inputs.regression_threshold_pct_iai_callgrind }}' != '-1' ]; then
             THRESHOLD='${{ inputs.regression_threshold_pct_iai_callgrind }}'
           fi
-          RUN_AT="$(date -u +"%Y-%m-%d %H:%M UTC")"
           HISTORY_ARG=""
           if [ -f history-callgrind.json ]; then
             HISTORY_ARG="--history-input history-callgrind.json"
           fi
           PR_ARG=""
-          if [ -n "${{ github.event.pull_request.number }}" ]; then
-            PR_ARG="--pr-number ${{ github.event.pull_request.number }}"
+          if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
+            PR_ARG="--pr-number ${{ steps.report_meta.outputs.pr_number }}"
           fi
-          HEAD_SHA='${{ github.event.pull_request.head.sha }}'
-          if [ -z "$HEAD_SHA" ]; then
-            HEAD_SHA='${{ github.sha }}'
+          OMIT_RUN_META_ARG=""
+          if [ "${{ inputs.backend }}" = "all" ]; then
+            OMIT_RUN_META_ARG="--omit-run-meta"
           fi
 
           python3 action-src/scripts/render_report.py \
@@ -403,11 +368,12 @@ jobs:
             --markdown-output report-callgrind.md \
             --summary-output summary-callgrind.json \
             --history-key "iai-callgrind-history" \
-            --head-sha "$HEAD_SHA" \
-            --run-at "$RUN_AT" \
+            --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
+            --run-at "${{ steps.report_meta.outputs.run_at }}" \
             --max-history 10 \
             $HISTORY_ARG \
-            $PR_ARG
+            $PR_ARG \
+            $OMIT_RUN_META_ARG
 
           if [ "${{ inputs.backend }}" != "all" ]; then
             cat report-callgrind.md >> "$GITHUB_STEP_SUMMARY"
@@ -422,18 +388,17 @@ jobs:
           if [ '${{ inputs.regression_threshold_pct_criterion }}' != '-1' ]; then
             THRESHOLD='${{ inputs.regression_threshold_pct_criterion }}'
           fi
-          RUN_AT="$(date -u +"%Y-%m-%d %H:%M UTC")"
           HISTORY_ARG=""
           if [ -f history-criterion.json ]; then
             HISTORY_ARG="--history-input history-criterion.json"
           fi
           PR_ARG=""
-          if [ -n "${{ github.event.pull_request.number }}" ]; then
-            PR_ARG="--pr-number ${{ github.event.pull_request.number }}"
+          if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
+            PR_ARG="--pr-number ${{ steps.report_meta.outputs.pr_number }}"
           fi
-          HEAD_SHA='${{ github.event.pull_request.head.sha }}'
-          if [ -z "$HEAD_SHA" ]; then
-            HEAD_SHA='${{ github.sha }}'
+          OMIT_RUN_META_ARG=""
+          if [ "${{ inputs.backend }}" = "all" ]; then
+            OMIT_RUN_META_ARG="--omit-run-meta"
           fi
 
           python3 action-src/scripts/render_report.py \
@@ -443,11 +408,12 @@ jobs:
             --markdown-output report-criterion.md \
             --summary-output summary-criterion.json \
             --history-key "criterion-history" \
-            --head-sha "$HEAD_SHA" \
-            --run-at "$RUN_AT" \
+            --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
+            --run-at "${{ steps.report_meta.outputs.run_at }}" \
             --max-history 10 \
             $HISTORY_ARG \
-            $PR_ARG
+            $PR_ARG \
+            $OMIT_RUN_META_ARG
 
           if [ "${{ inputs.backend }}" != "all" ]; then
             cat report-criterion.md >> "$GITHUB_STEP_SUMMARY"
@@ -457,10 +423,18 @@ jobs:
       - name: Compose combined report (backend=all)
         if: inputs.backend == 'all'
         run: |
+          PR_ARG=""
+          if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
+            PR_ARG="--pr-number ${{ steps.report_meta.outputs.pr_number }}"
+          fi
+
           python3 action-src/scripts/compose_combined_report.py \
             --output report.md \
             --report-callgrind report-callgrind.md \
-            --report-criterion report-criterion.md
+            --report-criterion report-criterion.md \
+            --run-at "${{ steps.report_meta.outputs.run_at }}" \
+            --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
+            $PR_ARG
 
           cat report.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -476,10 +450,15 @@ jobs:
           fi
           echo "has_regressions=$HAS_REGRESSIONS" >> "$GITHUB_OUTPUT"
 
+      - name: Build report artifact name
+        id: report_artifact_name
+        run: |
+          echo "value=bench-report-${{ inputs.backend }}-${{ github.run_id }}-${{ github.run_attempt }}-$(date +%s%N)" >> "$GITHUB_OUTPUT"
+
       - name: Upload report artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bench-report-${{ inputs.backend }}
+          name: ${{ steps.report_artifact_name.outputs.value }}
           path: |
             report*.md
             summary-*.json
@@ -494,37 +473,19 @@ jobs:
         uses: actions/github-script@v7
         env:
           REPORT_PATH: report-callgrind.md
-          BENCH_MARKER: "<!-- iai-callgrind-bench -->"
+          PRIMARY_MARKER: "<!-- iai-callgrind-bench -->"
+          MARKERS_JSON: '["<!-- iai-callgrind-bench -->"]'
         with:
           script: |
-            const fs = require('fs');
-            const marker = process.env.BENCH_MARKER;
-            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
-            const body = `${marker}\n${report}`;
-            const issue_number = context.payload.pull_request.number;
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number,
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.upsertReport({
+              github,
+              context,
+              reportPath: process.env.REPORT_PATH,
+              primaryMarker: process.env.PRIMARY_MARKER,
+              markers: JSON.parse(process.env.MARKERS_JSON),
+              deleteExtras: false,
             });
-
-            const existing = comments.find((c) => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body,
-              });
-            }
 
       - name: Upsert Criterion PR comment
         if: >-
@@ -536,37 +497,19 @@ jobs:
         uses: actions/github-script@v7
         env:
           REPORT_PATH: report-criterion.md
-          BENCH_MARKER: "<!-- criterion-bench -->"
+          PRIMARY_MARKER: "<!-- criterion-bench -->"
+          MARKERS_JSON: '["<!-- criterion-bench -->"]'
         with:
           script: |
-            const fs = require('fs');
-            const marker = process.env.BENCH_MARKER;
-            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
-            const body = `${marker}\n${report}`;
-            const issue_number = context.payload.pull_request.number;
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number,
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.upsertReport({
+              github,
+              context,
+              reportPath: process.env.REPORT_PATH,
+              primaryMarker: process.env.PRIMARY_MARKER,
+              markers: JSON.parse(process.env.MARKERS_JSON),
+              deleteExtras: false,
             });
-
-            const existing = comments.find((c) => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body,
-              });
-            }
 
       - name: Upsert consolidated PR comment (backend=all)
         if: >-
@@ -578,55 +521,18 @@ jobs:
         env:
           REPORT_PATH: report.md
           PRIMARY_MARKER: "<!-- rust-pr-bench -->"
-          LEGACY_CALLGRIND_MARKER: "<!-- iai-callgrind-bench -->"
-          LEGACY_CRITERION_MARKER: "<!-- criterion-bench -->"
+          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- iai-callgrind-bench -->","<!-- criterion-bench -->"]'
         with:
           script: |
-            const fs = require('fs');
-            const primaryMarker = process.env.PRIMARY_MARKER;
-            const markers = [
-              primaryMarker,
-              process.env.LEGACY_CALLGRIND_MARKER,
-              process.env.LEGACY_CRITERION_MARKER,
-            ];
-            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
-            const body = `${primaryMarker}\n${report}`;
-            const issue_number = context.payload.pull_request.number;
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number,
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.upsertReport({
+              github,
+              context,
+              reportPath: process.env.REPORT_PATH,
+              primaryMarker: process.env.PRIMARY_MARKER,
+              markers: JSON.parse(process.env.MARKERS_JSON),
+              deleteExtras: true,
             });
-
-            const matching = comments.filter(
-              (c) => c.body && markers.some((marker) => c.body.includes(marker))
-            );
-
-            if (matching.length > 0) {
-              const [first, ...rest] = matching;
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: first.id,
-                body,
-              });
-
-              for (const extra of rest) {
-                await github.rest.issues.deleteComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: extra.id,
-                });
-              }
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body,
-              });
-            }
 
       - name: Fail on regression
         if: inputs.fail_on_regression && steps.render_overall.outputs.has_regressions == 'true'

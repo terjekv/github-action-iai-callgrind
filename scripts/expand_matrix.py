@@ -201,6 +201,24 @@ def make_matrix(
     return {"include": include}
 
 
+def normalize_option_values(
+    argv: list[str], value_options: set[str], known_options: set[str]
+) -> list[str]:
+    normalized: list[str] = []
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+        if token in value_options and idx + 1 < len(argv):
+            next_token = argv[idx + 1]
+            if next_token.startswith("-") and next_token not in known_options:
+                normalized.append(f"{token}={next_token}")
+                idx += 2
+                continue
+        normalized.append(token)
+        idx += 1
+    return normalized
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-path", required=True)
@@ -212,7 +230,12 @@ def main() -> int:
     parser.add_argument("--auto-discover", action="store_true")
     parser.add_argument("--cargo-args", default="")
     parser.add_argument("--output", required=True)
-    args = parser.parse_args()
+    parsed_argv = normalize_option_values(
+        sys.argv[1:],
+        value_options={"--criterion-cli-args", "--cargo-args"},
+        known_options=set(parser._option_string_actions.keys()),
+    )
+    args = parser.parse_args(parsed_argv)
 
     repo_path = pathlib.Path(args.repo_path).resolve()
     backend_selection = normalize_backend_selection(args.backend)
