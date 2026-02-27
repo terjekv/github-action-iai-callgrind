@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/iai-callgrind-pr-bench.yml"
+      - ".github/workflows/rust-pr-bench.yml"
       - ".github/workflows/sample-self-test.yml"
       - "scripts/**"
       - "examples/sample-rust-app/**"
@@ -28,11 +29,26 @@ jobs:
 
   bench-sample:
     needs: clippy-sample
-    uses: ./.github/workflows/iai-callgrind-pr-bench.yml
+    uses: ./.github/workflows/rust-pr-bench.yml
     with:
+      backend: iai-callgrind
       working_directory: examples/sample-rust-app
       benchmarks_json: '["sample_bench"]'
       feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
       regression_threshold_pct: 2
+      fail_on_regression: false
+      comment_mode: always
+
+  bench-sample-criterion:
+    needs: clippy-sample
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      backend: criterion
+      working_directory: examples/sample-rust-app
+      benchmarks_json: '["sample_criterion_bench"]'
+      feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
+      criterion_cli_args: "--noplot --sample-size 30 --measurement-time 2"
+      criterion_statistic: median
+      regression_threshold_pct: 10
       fail_on_regression: false
       comment_mode: always

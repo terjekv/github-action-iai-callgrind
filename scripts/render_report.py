@@ -27,8 +27,29 @@ def classify(delta_pct: float, threshold: float) -> tuple[str, bool]:
     return ("⚪ neutral", False)
 
 
-def fmt_int(value: int) -> str:
-    return f"{value:,}"
+def normalize_backend(raw: str) -> str:
+    value = str(raw).strip().lower()
+    if value in {"iai", "iai-callgrind", "callgrind"}:
+        return "iai-callgrind"
+    if value in {"criterion"}:
+        return "criterion"
+    return "iai-callgrind"
+
+
+def backend_title(backend: str) -> str:
+    if backend == "criterion":
+        return "Criterion Benchmark Report"
+    return "IAI-Callgrind Benchmark Report"
+
+
+def fmt_number(value: float | int) -> str:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return "n/a"
+    rounded = round(numeric)
+    if abs(numeric - rounded) < 1e-9:
+        return f"{int(rounded):,}"
+    return f"{numeric:,.2f}"
 
 
 def fmt_pct(value: float) -> str:
@@ -41,8 +62,8 @@ def fmt_pct_or_na(value: float | None) -> str:
     return fmt_pct(value)
 
 
-def metric_delta(base_value: int, head_value: int) -> float:
-    if base_value == 0:
+def metric_delta(base_value: float, head_value: float) -> float:
+    if base_value == 0.0:
         return 0.0 if head_value == 0 else float("inf")
     return ((head_value - base_value) / base_value) * 100.0
 
@@ -55,8 +76,8 @@ def avg(values: Iterable[float]) -> float | None:
 
 
 def collect_metric_deltas(entry: dict[str, Any]) -> list[float]:
-    base_metrics = {item["metric"]: int(item["value"]) for item in entry.get("base_metrics", [])}
-    head_metrics = {item["metric"]: int(item["value"]) for item in entry.get("head_metrics", [])}
+    base_metrics = {item["metric"]: float(item["value"]) for item in entry.get("base_metrics", [])}
+    head_metrics = {item["metric"]: float(item["value"]) for item in entry.get("head_metrics", [])}
     metric_names = set(base_metrics.keys()) | set(head_metrics.keys())
     deltas: list[float] = []
     for metric_name in metric_names:
@@ -118,8 +139,8 @@ def render_metric_breakdown(entry: dict[str, Any], threshold: float) -> list[str
         lines.append("</details>")
         return lines
 
-    base_metrics = {item["metric"]: int(item["value"]) for item in entry.get("base_metrics", [])}
-    head_metrics = {item["metric"]: int(item["value"]) for item in entry.get("head_metrics", [])}
+    base_metrics = {item["metric"]: float(item["value"]) for item in entry.get("base_metrics", [])}
+    head_metrics = {item["metric"]: float(item["value"]) for item in entry.get("head_metrics", [])}
     metric_names = sorted(set(base_metrics.keys()) | set(head_metrics.keys()))
     short_metric_names = make_unique_metric_labels(metric_names)
 
@@ -137,8 +158,8 @@ def render_metric_breakdown(entry: dict[str, Any], threshold: float) -> list[str
         lines.append(
             "| {metric} | {base} | {head} | {delta} | {status} |".format(
                 metric=short_metric_names[metric_name],
-                base=fmt_int(base_value),
-                head=fmt_int(head_value),
+                base=fmt_number(base_value),
+                head=fmt_number(head_value),
                 delta=fmt_pct(delta_pct) if math.isfinite(delta_pct) else "n/a",
                 status=status if math.isfinite(delta_pct) else "⚪ unknown",
             )
@@ -189,17 +210,24 @@ def make_unique_metric_labels(metric_names: list[str]) -> dict[str, str]:
 def render_markdown(
     results: list[dict[str, Any]],
     threshold: float,
+    backend: str,
     pr_number: int | None,
     head_sha: str | None,
     run_at: str | None,
     history: list[dict[str, Any]],
     max_history: int,
+    history_marker_key: str,
 ) -> tuple[str, dict[str, Any]]:
+    backend = normalize_backend(backend)
     if not results:
         return (
-            "## IAI-Callgrind Benchmark Report\n\nNo benchmark results were found.",
-            {"has_regressions": False, "count": 0, "latest": {}, "history": history},
+            f"## {backend_title(backend)}\n\nNo benchmark results were found.",
+            {"has_regressions": False, "count": 0, "latest": {}, "history": history, "backend": backend},
         )
+
+    backend = normalize_backend(results[0].get("backend", backend))
+    comparison_statistic = str(results[0].get("comparison_statistic") or "summary")
+    metric_unit = str(results[0].get("metric_unit") or "")
 
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in results:
@@ -207,9 +235,12 @@ def render_markdown(
 
     has_regressions = False
     lines: list[str] = []
-    lines.append("## IAI-Callgrind Benchmark Report")
+    lines.append(f"## {backend_title(backend)}")
     lines.append("")
     lines.append(f"Regression threshold: **{threshold:.2f}%**")
+    if backend == "criterion":
+        unit_text = f" ({metric_unit})" if metric_unit else ""
+        lines.append(f"Comparison statistic: **{comparison_statistic}**{unit_text}")
     if pr_number is not None or run_at or head_sha:
         pr_part = f"PR: #{pr_number}" if pr_number is not None else "PR: n/a"
         run_part = f"Latest: {run_at}" if run_at else "Latest: n/a"
@@ -264,8 +295,8 @@ def render_markdown(
             section_lines.append(
                 "| {bench} | {base} | {head} | {delta} | {status} |".format(
                     bench=entry["benchmark_name"],
-                    base=fmt_int(int(entry["base_total"])),
-                    head=fmt_int(int(entry["head_total"])),
+                    base=fmt_number(float(entry["base_total"])),
+                    head=fmt_number(float(entry["head_total"])),
                     delta=fmt_pct_or_na(float(entry["delta_pct"])),
                     status=status,
                 )
@@ -339,6 +370,7 @@ def render_markdown(
     avg_bench_delta_all = avg(all_bench_deltas)
     avg_metric_delta_all = avg(all_metric_deltas)
     latest_entry = {
+        "backend": backend,
         "commit": head_sha or "",
         "run_at": run_at or "",
         "summary": {
@@ -351,14 +383,18 @@ def render_markdown(
         "has_regressions": has_regressions,
     }
 
-    def history_key(item: dict[str, Any]) -> str:
+    def history_entry_key(item: dict[str, Any]) -> str:
+        item_backend = normalize_backend(item.get("backend", backend))
         commit = str(item.get("commit") or "")
-        return commit
+        return f"{item_backend}:{commit}"
 
     new_history: list[dict[str, Any]] = [latest_entry]
-    seen = {history_key(latest_entry)}
+    seen = {history_entry_key(latest_entry)}
     for item in history:
-        key = history_key(item)
+        item_backend = normalize_backend(item.get("backend", backend))
+        if item_backend != backend:
+            continue
+        key = history_entry_key(item)
         if not key or key in seen:
             continue
         new_history.append(item)
@@ -391,11 +427,12 @@ def render_markdown(
 
     history_payload = json.dumps({"history": new_history}, separators=(",", ":"))
     lines.append("")
-    lines.append(f"<!-- iai-callgrind-history: {history_payload} -->")
+    lines.append(f"<!-- {history_marker_key}: {history_payload} -->")
 
     summary_payload = {
         "has_regressions": has_regressions,
         "count": len(results),
+        "backend": backend,
         "latest": latest_entry,
         "history": new_history,
     }
@@ -406,9 +443,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifacts-dir", required=True)
     parser.add_argument("--threshold", required=True, type=float)
+    parser.add_argument("--backend", default="iai-callgrind")
     parser.add_argument("--markdown-output", required=True)
     parser.add_argument("--summary-output", required=True)
     parser.add_argument("--history-input")
+    parser.add_argument("--history-key", default="iai-callgrind-history")
     parser.add_argument("--head-sha")
     parser.add_argument("--run-at")
     parser.add_argument("--pr-number", type=int)
@@ -429,11 +468,13 @@ def main() -> int:
     markdown, summary_payload = render_markdown(
         results,
         args.threshold,
+        args.backend,
         args.pr_number,
         args.head_sha,
         args.run_at,
         history,
         args.max_history,
+        args.history_key,
     )
 
     pathlib.Path(args.markdown_output).write_text(markdown, encoding="utf-8")

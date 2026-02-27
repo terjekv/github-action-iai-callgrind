@@ -7,17 +7,64 @@ import shlex
 import sys
 from typing import Any
 
+BACKENDS = ("iai-callgrind", "criterion")
 
-def discover_benchmarks(repo_path: pathlib.Path, working_directory: str) -> list[dict[str, Any]]:
+
+def normalize_backend(raw: str) -> str:
+    value = raw.strip().lower()
+    if value in {"iai", "iai-callgrind", "callgrind"}:
+        return "iai-callgrind"
+    if value in {"criterion"}:
+        return "criterion"
+    raise ValueError(f"unsupported backend '{raw}' (expected 'iai-callgrind' or 'criterion')")
+
+
+def normalize_backend_selection(raw: str) -> str:
+    value = raw.strip().lower()
+    if value in {"all", "any"}:
+        return "all"
+    return normalize_backend(raw)
+
+
+def expand_backends(selection: str) -> list[str]:
+    if selection == "all":
+        return list(BACKENDS)
+    return [selection]
+
+
+def infer_name_backend(name: str) -> str | None:
+    lowered = name.lower()
+    has_callgrind = "callgrind" in lowered
+    has_criterion = "criterion" in lowered
+    if has_callgrind and not has_criterion:
+        return "iai-callgrind"
+    if has_criterion and not has_callgrind:
+        return "criterion"
+    return None
+
+
+def discover_benchmarks(
+    repo_path: pathlib.Path, working_directory: str, backend_selection: str
+) -> list[dict[str, Any]]:
     benches_dir = repo_path / working_directory / "benches"
     if not benches_dir.exists():
         return []
 
+    selected_backends = set(expand_backends(backend_selection))
     benchmarks: list[dict[str, Any]] = []
     for path in sorted(benches_dir.glob("*.rs")):
         if path.name == "mod.rs":
             continue
-        benchmarks.append({"name": path.stem, "bench": path.stem})
+
+        inferred_backend = infer_name_backend(path.stem)
+        if inferred_backend and inferred_backend not in selected_backends:
+            continue
+
+        candidate_backends = [inferred_backend] if inferred_backend else list(BACKENDS)
+        for backend in candidate_backends:
+            if backend not in selected_backends:
+                continue
+            benchmarks.append({"name": path.stem, "bench": path.stem, "backend": backend})
     return benchmarks
 
 
@@ -45,7 +92,13 @@ def normalize_feature_sets(raw: Any) -> list[dict[str, Any]]:
     return normalized
 
 
-def build_command(spec: dict[str, Any], feature_set: dict[str, Any], cargo_args: str) -> str:
+def build_command(
+    spec: dict[str, Any],
+    feature_set: dict[str, Any],
+    cargo_args: str,
+    backend: str,
+    criterion_cli_args: str,
+) -> str:
     features = feature_set["features"].strip()
     no_default = feature_set.get("no_default_features", False)
 
@@ -79,6 +132,10 @@ def build_command(spec: dict[str, Any], feature_set: dict[str, Any], cargo_args:
         extra_args = spec.get("args")
         if extra_args:
             parts.append(str(extra_args))
+        if backend == "criterion":
+            criterion_args = str(spec.get("criterion_args", criterion_cli_args)).strip()
+            if criterion_args:
+                parts.extend(["--", criterion_args])
         command = " ".join(parts)
 
     if cargo_args.strip():
@@ -87,21 +144,58 @@ def build_command(spec: dict[str, Any], feature_set: dict[str, Any], cargo_args:
     return " ".join(command.split())
 
 
+def expand_benchmark_entry(entry: Any, backend_selection: str) -> list[dict[str, Any]]:
+    selected_backends = expand_backends(backend_selection)
+
+    def with_backends(base: dict[str, Any], explicit_backend: str | None) -> list[dict[str, Any]]:
+        if explicit_backend:
+            if explicit_backend not in selected_backends:
+                return []
+            item = dict(base)
+            item["backend"] = explicit_backend
+            return [item]
+
+        items: list[dict[str, Any]] = []
+        for backend in selected_backends:
+            item = dict(base)
+            item["backend"] = backend
+            items.append(item)
+        return items
+
+    if isinstance(entry, str):
+        return with_backends({"name": entry, "bench": entry}, explicit_backend=None)
+    if isinstance(entry, dict):
+        explicit_backend = entry.get("backend")
+        normalized: str | None = None
+        if explicit_backend:
+            normalized = normalize_backend(str(explicit_backend))
+        return with_backends(entry, explicit_backend=normalized)
+
+    raise ValueError("benchmark entries must be objects or strings")
+
+
 def make_matrix(
-    benchmarks: list[dict[str, Any]], feature_sets: list[dict[str, Any]], cargo_args: str
+    benchmarks: list[dict[str, Any]],
+    feature_sets: list[dict[str, Any]],
+    cargo_args: str,
+    criterion_cli_args: str,
 ) -> dict[str, list[dict[str, Any]]]:
     include: list[dict[str, Any]] = []
     for bench in benchmarks:
+        backend = normalize_backend(str(bench.get("backend", "iai-callgrind")))
         bench_name = str(bench.get("name") or bench.get("bench") or "benchmark")
         for feature_set in feature_sets:
-            case_seed = f"{bench_name}|{feature_set['name']}|{feature_set['features']}"
+            case_seed = f"{backend}|{bench_name}|{feature_set['name']}|{feature_set['features']}"
             case_id = hashlib.sha1(case_seed.encode("utf-8")).hexdigest()[:10]
             include.append(
                 {
                     "id": case_id,
+                    "backend": backend,
                     "benchmark_name": bench_name,
                     "feature_name": feature_set["name"],
-                    "command": build_command(bench, feature_set, cargo_args),
+                    "command": build_command(
+                        bench, feature_set, cargo_args, backend, criterion_cli_args
+                    ),
                 }
             )
     return {"include": include}
@@ -113,12 +207,15 @@ def main() -> int:
     parser.add_argument("--working-directory", default=".")
     parser.add_argument("--benchmarks-json", required=True)
     parser.add_argument("--feature-sets-json", required=True)
+    parser.add_argument("--backend", default="iai-callgrind")
+    parser.add_argument("--criterion-cli-args", default="--noplot")
     parser.add_argument("--auto-discover", action="store_true")
     parser.add_argument("--cargo-args", default="")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
     repo_path = pathlib.Path(args.repo_path).resolve()
+    backend_selection = normalize_backend_selection(args.backend)
 
     benchmarks_raw = json.loads(args.benchmarks_json)
     if benchmarks_raw and not isinstance(benchmarks_raw, list):
@@ -126,26 +223,27 @@ def main() -> int:
 
     benchmarks: list[dict[str, Any]] = []
     for entry in benchmarks_raw:
-        if isinstance(entry, str):
-            benchmarks.append({"name": entry, "bench": entry})
-        elif isinstance(entry, dict):
-            benchmarks.append(entry)
-        else:
-            raise ValueError("benchmark entries must be objects or strings")
+        benchmarks.extend(expand_benchmark_entry(entry, backend_selection))
 
     if args.auto_discover and not benchmarks:
-        benchmarks = discover_benchmarks(repo_path, args.working_directory)
+        benchmarks = discover_benchmarks(repo_path, args.working_directory, backend_selection)
 
     if not benchmarks:
         print(
-            "No benchmarks configured. Provide benchmarks_json or enable auto_discover with benches/*.rs",
+            f"No benchmarks configured for backend '{backend_selection}'. "
+            "Provide benchmarks_json or enable auto_discover with benches/*.rs",
             file=sys.stderr,
         )
         return 1
 
     feature_sets = normalize_feature_sets(json.loads(args.feature_sets_json))
 
-    matrix = make_matrix(benchmarks, feature_sets, args.cargo_args)
+    matrix = make_matrix(
+        benchmarks,
+        feature_sets,
+        args.cargo_args,
+        args.criterion_cli_args,
+    )
     pathlib.Path(args.output).write_text(json.dumps(matrix), encoding="utf-8")
     return 0
 
