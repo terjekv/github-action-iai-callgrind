@@ -112,6 +112,7 @@ You can override this by either:
 - Lower values are treated as better for both backends:
   - `iai-callgrind`: callgrind summary event counts
   - `criterion`: selected estimate statistic (`mean` or `median`, unit `ns`)
+- With `backend: all`, the workflow posts a single consolidated PR comment with one section per backend.
 - The workflow installs `valgrind` and `iai-callgrind-runner` only for `iai-callgrind`.
 - Benchmark command overrides can use placeholders:
   - `{features}`
@@ -124,4 +125,4 @@ This repository includes a sample Rust project at `examples/sample-rust-app`.
 - It has an `iai-callgrind` benchmark target: `sample_bench`.
 - It has a `criterion` benchmark target: `sample_criterion_bench`.
 - It defines two feature sets: `default` and `alt-impl`.
-- The workflow `.github/workflows/sample-self-test.yml` first runs clippy, then calls the reusable workflow in this repo twice to validate both backends end-to-end on pull requests.
+- The workflow `.github/workflows/sample-self-test.yml` first runs clippy, then calls the reusable workflow in `backend: all` mode to validate both backends end-to-end on pull requests.

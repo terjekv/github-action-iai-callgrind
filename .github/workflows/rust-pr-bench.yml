@@ -279,11 +279,13 @@ jobs:
         uses: actions/github-script@v7
         env:
           HISTORY_PATH: history-callgrind.json
+          PRIMARY_MARKER: "<!-- rust-pr-bench -->"
           BENCH_MARKER: "<!-- iai-callgrind-bench -->"
           HISTORY_KEY: "iai-callgrind-history"
         with:
           script: |
             const fs = require('fs');
+            const primaryMarker = process.env.PRIMARY_MARKER;
             const marker = process.env.BENCH_MARKER;
             const historyKey = process.env.HISTORY_KEY;
             const escapedKey = historyKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -296,7 +298,9 @@ jobs:
               issue_number,
             });
 
-            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            const existing =
+              comments.find((c) => c.body && c.body.includes(primaryMarker)) ||
+              comments.find((c) => c.body && c.body.includes(marker));
             if (!existing || !existing.body) {
               return;
             }
@@ -318,11 +322,13 @@ jobs:
         uses: actions/github-script@v7
         env:
           HISTORY_PATH: history-criterion.json
+          PRIMARY_MARKER: "<!-- rust-pr-bench -->"
           BENCH_MARKER: "<!-- criterion-bench -->"
           HISTORY_KEY: "criterion-history"
         with:
           script: |
             const fs = require('fs');
+            const primaryMarker = process.env.PRIMARY_MARKER;
             const marker = process.env.BENCH_MARKER;
             const historyKey = process.env.HISTORY_KEY;
             const escapedKey = historyKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -335,7 +341,9 @@ jobs:
               issue_number,
             });
 
-            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            const existing =
+              comments.find((c) => c.body && c.body.includes(primaryMarker)) ||
+              comments.find((c) => c.body && c.body.includes(marker));
             if (!existing || !existing.body) {
               return;
             }
@@ -383,7 +391,9 @@ jobs:
             $HISTORY_ARG \
             $PR_ARG
 
-          cat report-callgrind.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.backend }}" != "all" ]; then
+            cat report-callgrind.md >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
 
       - name: Render Criterion report
@@ -417,8 +427,45 @@ jobs:
             $HISTORY_ARG \
             $PR_ARG
 
-          cat report-criterion.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.backend }}" != "all" ]; then
+            cat report-criterion.md >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+
+      - name: Compose combined report (backend=all)
+        if: inputs.backend == 'all'
+        run: |
+          python3 - <<'PY'
+          import pathlib
+
+          output = pathlib.Path("report.md")
+          sections: list[str] = []
+
+          for title, path in (
+              ("IAI-Callgrind", pathlib.Path("report-callgrind.md")),
+              ("Criterion", pathlib.Path("report-criterion.md")),
+          ):
+              if not path.exists():
+                  continue
+              text = path.read_text(encoding="utf-8")
+              lines = text.splitlines()
+              if lines and lines[0].startswith("## "):
+                  lines = lines[1:]
+              if lines and not lines[0].strip():
+                  lines = lines[1:]
+              body = "\n".join(lines).strip()
+              sections.append(f"## {title}\n\n{body}")
+
+          if not sections:
+              raise SystemExit("No backend reports were generated.")
+
+          output.write_text(
+              "## Rust PR Benchmark Report\n\n" + "\n\n".join(sections) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compute overall regression flag
         id: render_overall
@@ -437,12 +484,13 @@ jobs:
         with:
           name: bench-report-${{ inputs.backend }}
           path: |
-            report-*.md
+            report*.md
             summary-*.json
 
       - name: Upsert IAI-Callgrind PR comment
         if: >-
           github.event_name == 'pull_request' &&
+          inputs.backend != 'all' &&
           inputs.backend != 'criterion' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_callgrind.outputs.has_regressions == 'true'))
@@ -484,6 +532,7 @@ jobs:
       - name: Upsert Criterion PR comment
         if: >-
           github.event_name == 'pull_request' &&
+          inputs.backend != 'all' &&
           inputs.backend != 'iai-callgrind' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_criterion.outputs.has_regressions == 'true'))
@@ -513,6 +562,66 @@ jobs:
                 comment_id: existing.id,
                 body,
               });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+            }
+
+      - name: Upsert consolidated PR comment (backend=all)
+        if: >-
+          github.event_name == 'pull_request' &&
+          inputs.backend == 'all' &&
+          (inputs.comment_mode == 'always' ||
+          (inputs.comment_mode == 'on-regression' && steps.render_overall.outputs.has_regressions == 'true'))
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: report.md
+          PRIMARY_MARKER: "<!-- rust-pr-bench -->"
+          LEGACY_CALLGRIND_MARKER: "<!-- iai-callgrind-bench -->"
+          LEGACY_CRITERION_MARKER: "<!-- criterion-bench -->"
+        with:
+          script: |
+            const fs = require('fs');
+            const primaryMarker = process.env.PRIMARY_MARKER;
+            const markers = [
+              primaryMarker,
+              process.env.LEGACY_CALLGRIND_MARKER,
+              process.env.LEGACY_CRITERION_MARKER,
+            ];
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            const body = `${primaryMarker}\n${report}`;
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+
+            const matching = comments.filter(
+              (c) => c.body && markers.some((marker) => c.body.includes(marker))
+            );
+
+            if (matching.length > 0) {
+              const [first, ...rest] = matching;
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: first.id,
+                body,
+              });
+
+              for (const extra of rest) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: extra.id,
+                });
+              }
             } else {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
