@@ -72,6 +72,20 @@ on:
         required: false
         type: number
         default: 3
+      regression_threshold_pct_iai_callgrind:
+        description: >-
+          Optional override threshold for iai-callgrind backend. Use -1 to fall back to
+          regression_threshold_pct.
+        required: false
+        type: number
+        default: -1
+      regression_threshold_pct_criterion:
+        description: >-
+          Optional override threshold for criterion backend. Use -1 to fall back to
+          regression_threshold_pct.
+        required: false
+        type: number
+        default: -1
       fail_on_regression:
         description: Fail workflow if any case regresses above threshold.
         required: false
@@ -104,6 +118,8 @@ jobs:
       criterion_statistic: ${{ inputs.criterion_statistic }}
       base_sha: ${{ inputs.base_sha }}
       regression_threshold_pct: ${{ inputs.regression_threshold_pct }}
+      regression_threshold_pct_iai_callgrind: ${{ inputs.regression_threshold_pct_iai_callgrind }}
+      regression_threshold_pct_criterion: ${{ inputs.regression_threshold_pct_criterion }}
       fail_on_regression: ${{ inputs.fail_on_regression }}
       comment_mode: ${{ inputs.comment_mode }}
     secrets: inherit

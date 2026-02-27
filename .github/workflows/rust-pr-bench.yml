@@ -72,6 +72,20 @@ on:
         required: false
         type: number
         default: 3
+      regression_threshold_pct_iai_callgrind:
+        description: >-
+          Optional override threshold for iai-callgrind backend. Use -1 to fall back to
+          regression_threshold_pct.
+        required: false
+        type: number
+        default: -1
+      regression_threshold_pct_criterion:
+        description: >-
+          Optional override threshold for criterion backend. Use -1 to fall back to
+          regression_threshold_pct.
+        required: false
+        type: number
+        default: -1
       fail_on_regression:
         description: Fail workflow if any case regresses above threshold.
         required: false
@@ -364,6 +378,10 @@ jobs:
         id: render_callgrind
         if: inputs.backend != 'criterion'
         run: |
+          THRESHOLD='${{ inputs.regression_threshold_pct }}'
+          if [ '${{ inputs.regression_threshold_pct_iai_callgrind }}' != '-1' ]; then
+            THRESHOLD='${{ inputs.regression_threshold_pct_iai_callgrind }}'
+          fi
           RUN_AT="$(date -u +"%Y-%m-%d %H:%M UTC")"
           HISTORY_ARG=""
           if [ -f history-callgrind.json ]; then
@@ -380,7 +398,7 @@ jobs:
 
           python3 action-src/scripts/render_report.py \
             --artifacts-dir artifacts-iai-callgrind \
-            --threshold "${{ inputs.regression_threshold_pct }}" \
+            --threshold "$THRESHOLD" \
             --backend "iai-callgrind" \
             --markdown-output report-callgrind.md \
             --summary-output summary-callgrind.json \
@@ -400,6 +418,10 @@ jobs:
         id: render_criterion
         if: inputs.backend != 'iai-callgrind'
         run: |
+          THRESHOLD='${{ inputs.regression_threshold_pct }}'
+          if [ '${{ inputs.regression_threshold_pct_criterion }}' != '-1' ]; then
+            THRESHOLD='${{ inputs.regression_threshold_pct_criterion }}'
+          fi
           RUN_AT="$(date -u +"%Y-%m-%d %H:%M UTC")"
           HISTORY_ARG=""
           if [ -f history-criterion.json ]; then
@@ -416,7 +438,7 @@ jobs:
 
           python3 action-src/scripts/render_report.py \
             --artifacts-dir artifacts-criterion \
-            --threshold "${{ inputs.regression_threshold_pct }}" \
+            --threshold "$THRESHOLD" \
             --backend "criterion" \
             --markdown-output report-criterion.md \
             --summary-output summary-criterion.json \
@@ -435,35 +457,10 @@ jobs:
       - name: Compose combined report (backend=all)
         if: inputs.backend == 'all'
         run: |
-          python3 - <<'PY'
-          import pathlib
-
-          output = pathlib.Path("report.md")
-          sections: list[str] = []
-
-          for title, path in (
-              ("IAI-Callgrind", pathlib.Path("report-callgrind.md")),
-              ("Criterion", pathlib.Path("report-criterion.md")),
-          ):
-              if not path.exists():
-                  continue
-              text = path.read_text(encoding="utf-8")
-              lines = text.splitlines()
-              if lines and lines[0].startswith("## "):
-                  lines = lines[1:]
-              if lines and not lines[0].strip():
-                  lines = lines[1:]
-              body = "\n".join(lines).strip()
-              sections.append(f"## {title}\n\n{body}")
-
-          if not sections:
-              raise SystemExit("No backend reports were generated.")
-
-          output.write_text(
-              "## Rust PR Benchmark Report\n\n" + "\n\n".join(sections) + "\n",
-              encoding="utf-8",
-          )
-          PY
+          python3 action-src/scripts/compose_combined_report.py \
+            --output report.md \
+            --report-callgrind report-callgrind.md \
+            --report-criterion report-criterion.md
 
           cat report.md >> "$GITHUB_STEP_SUMMARY"
 

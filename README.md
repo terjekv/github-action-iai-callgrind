@@ -57,6 +57,8 @@ jobs:
       backend: all
       auto_discover: true
       criterion_statistic: median
+      regression_threshold_pct_iai_callgrind: 3
+      regression_threshold_pct_criterion: 10
 ```
 
 ## Inputs
@@ -90,6 +92,12 @@ jobs:
   - Statistic used for Criterion base-vs-head comparison deltas.
 - `base_sha` (string, optional override)
 - `regression_threshold_pct` (number, default `3`)
+- `regression_threshold_pct_iai_callgrind` (number, default `-1`)
+  - Optional backend-specific threshold override for `iai-callgrind`.
+  - `-1` means "use `regression_threshold_pct`".
+- `regression_threshold_pct_criterion` (number, default `-1`)
+  - Optional backend-specific threshold override for `criterion`.
+  - `-1` means "use `regression_threshold_pct`".
 - `fail_on_regression` (boolean, default `false`)
 - `comment_mode` (`always` | `on-regression` | `never`, default `always`)
 - `action_repository` (string, default `terjekv/github-action-iai-callgrind`)
@@ -114,6 +122,12 @@ You can override this by either:
   - `criterion`: selected estimate statistic (`mean` or `median`, unit `ns`)
 - With `backend: all`, the workflow posts a single consolidated PR comment with one section per backend.
 - The workflow installs `valgrind` and `iai-callgrind-runner` only for `iai-callgrind`.
+- Markdown layout is template-driven for easier iteration:
+  - `scripts/templates/report_single.md.tmpl`
+  - `scripts/templates/report_single_summary.md.tmpl`
+  - `scripts/templates/report_single_history.md.tmpl`
+  - `scripts/templates/report_combined.md.tmpl`
+  - `scripts/templates/report_combined_backend_section.md.tmpl`
 - Benchmark command overrides can use placeholders:
   - `{features}`
   - `{no_default_features_flag}`
