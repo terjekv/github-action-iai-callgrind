@@ -121,6 +121,7 @@ def render_metric_breakdown(entry: dict[str, Any], threshold: float) -> list[str
     base_metrics = {item["metric"]: int(item["value"]) for item in entry.get("base_metrics", [])}
     head_metrics = {item["metric"]: int(item["value"]) for item in entry.get("head_metrics", [])}
     metric_names = sorted(set(base_metrics.keys()) | set(head_metrics.keys()))
+    short_metric_names = make_unique_metric_labels(metric_names)
 
     lines.append(
         f"<details><summary>{entry['benchmark_name']} metric breakdown ({len(metric_names)} metrics)</summary>"
@@ -135,7 +136,7 @@ def render_metric_breakdown(entry: dict[str, Any], threshold: float) -> list[str
         status, _ = classify(delta_pct, threshold)
         lines.append(
             "| {metric} | {base} | {head} | {delta} | {status} |".format(
-                metric=metric_name,
+                metric=short_metric_names[metric_name],
                 base=fmt_int(base_value),
                 head=fmt_int(head_value),
                 delta=fmt_pct(delta_pct) if math.isfinite(delta_pct) else "n/a",
@@ -145,6 +146,44 @@ def render_metric_breakdown(entry: dict[str, Any], threshold: float) -> list[str
     lines.append("")
     lines.append("</details>")
     return lines
+
+
+def make_unique_metric_labels(metric_names: list[str]) -> dict[str, str]:
+    if not metric_names:
+        return {}
+
+    segments = {name: [seg for seg in name.split("/") if seg] for name in metric_names}
+    max_segments = max((len(parts) for parts in segments.values()), default=1)
+    lengths = {name: 1 for name in metric_names}
+
+    while True:
+        labels: dict[str, list[str]] = {}
+        for name in metric_names:
+            parts = segments[name]
+            length = min(lengths[name], len(parts))
+            short = "/".join(parts[-length:]) if parts else name
+            labels.setdefault(short, []).append(name)
+
+        collisions = {short: names for short, names in labels.items() if len(names) > 1}
+        if not collisions:
+            break
+
+        progressed = False
+        for names in collisions.values():
+            for name in names:
+                if lengths[name] < max_segments:
+                    lengths[name] += 1
+                    progressed = True
+        if not progressed:
+            break
+
+    rendered: dict[str, str] = {}
+    for name in metric_names:
+        parts = segments[name]
+        length = min(lengths[name], len(parts))
+        short = "/".join(parts[-length:]) if parts else name
+        rendered[name] = f'<span title="{name}">{short}</span>'
+    return rendered
 
 
 def render_markdown(
