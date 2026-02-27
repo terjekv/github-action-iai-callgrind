@@ -121,7 +121,7 @@ jobs:
             --benchmarks-json '${{ inputs.benchmarks_json }}' \
             --feature-sets-json '${{ inputs.feature_sets_json }}' \
             --backend "${{ inputs.backend }}" \
-            --criterion-cli-args "${{ inputs.criterion_cli_args }}" \
+            --criterion-cli-args="${{ inputs.criterion_cli_args }}" \
             ${{ inputs.auto_discover && '--auto-discover' || '' }} \
             --cargo-args "${{ inputs.cargo_args }}" \
             --output matrix.json
