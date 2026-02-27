@@ -9,6 +9,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 Changelog tracking formally starts with `2.0.0`. Earlier releases, including `v1`, were not backfilled here.
 
+## [2.0.1] - 2026-02-27
+
+### Fixed
+
+- Fixed the report job dependency graph so benchmark artifacts are downloaded correctly before rendering the PR report.
+
 ## [2.0.0] - 2026-02-27
 
 ### Added
