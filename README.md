@@ -153,6 +153,7 @@ jobs:
 - `cargo_args` (string, appended to all commands)
 - `criterion_cli_args` (string, default `--noplot`)
   - Added after `--` for default Criterion commands.
+  - This action does not override Criterion's sampling defaults unless you pass additional CLI args.
 - `criterion_statistic` (`mean` | `median`, default `mean`)
   - Statistic used for Criterion base-vs-head comparison deltas.
 - `base_sha` (string, optional override)
@@ -221,6 +222,56 @@ Use explicit `benchmarks_json` instead of autodiscovery when:
 - Benchmark command overrides can use placeholders:
   - `{features}`
   - `{no_default_features_flag}`
+
+## Criterion defaults and noise
+
+By default, this action passes only `--noplot` to Criterion.
+
+That means Criterion's own defaults still apply unless you override them:
+
+- sample size: `100`
+- warm-up time: `3s`
+- measurement time: `5s`
+- noise threshold: `1%`
+
+On shared CI runners, seeing about `1-3%` variation on unchanged code is not unusual. If you see that level of noise, treat Criterion as a higher-variance signal than `iai-callgrind` and tune it explicitly.
+
+Recommended ways to reduce noise:
+
+- Prefer `criterion_statistic: median` over `mean` for PR comparisons.
+- Increase `--sample-size` and `--measurement-time`.
+- Raise `regression_threshold_pct_criterion` above your observed noise floor.
+- Use explicit `benchmarks_json` entries with per-benchmark `criterion_args` if only some benches are noisy.
+- Prefer dedicated or less contended runners if you want tighter regression gates.
+
+Example tuned Criterion setup:
+
+```yaml
+jobs:
+  bench:
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2
+    with:
+      backend: criterion
+      auto_discover: true
+      criterion_cli_args: "--noplot --sample-size 120 --measurement-time 8"
+      criterion_statistic: median
+      regression_threshold_pct_criterion: 5
+      fail_on_regression: true
+```
+
+Per-benchmark overrides are also supported:
+
+```yaml
+benchmarks_json: >-
+  [
+    {
+      "name":"parser_criterion",
+      "bench":"parser_criterion",
+      "backend":"criterion",
+      "criterion_args":"--noplot --sample-size 200 --measurement-time 15"
+    }
+  ]
+```
 
 ## Local fixture for CI validation
 
