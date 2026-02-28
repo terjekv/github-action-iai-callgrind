@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/iai-callgrind-pr-bench.yml"
       - ".github/workflows/rust-pr-bench.yml"
+      - ".github/workflows/release.yml"
       - ".github/workflows/sample-self-test.yml"
       - "scripts/**"
       - "tests/**"

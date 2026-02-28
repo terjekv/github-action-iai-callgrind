@@ -42,6 +42,18 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("      - prepare-matrix", report_block)
         self.assertIn("      - benchmark", report_block)
 
+    def test_release_workflow_publishes_on_version_tags(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("name: Release", workflow)
+        self.assertIn("  push:", workflow)
+        self.assertIn('      - "v*"', workflow)
+        self.assertIn("  contents: write", workflow)
+        self.assertIn("uses: softprops/action-gh-release@v2", workflow)
+        self.assertIn('version = os.environ["TAG_NAME"].removeprefix("v")', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
