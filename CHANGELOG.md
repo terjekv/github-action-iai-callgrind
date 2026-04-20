@@ -11,6 +11,8 @@ Changelog tracking formally starts with `2.0.0`. Earlier releases, including `v1
 
 ## [2.0.2] - 2026-04-20
 
+### Fixed
+
 - Bump checkout and upload-artifact actions.
 
 ## [2.0.1] - 2026-02-27
