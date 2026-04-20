@@ -9,6 +9,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 Changelog tracking formally starts with `2.0.0`. Earlier releases, including `v1`, were not backfilled here.
 
+## [2.0.2] - 2026-04-20
+
+- Bump checkout and upload-artifact actions.
+
 ## [2.0.1] - 2026-02-27
 
 ### Fixed

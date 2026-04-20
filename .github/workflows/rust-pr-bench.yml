@@ -115,14 +115,14 @@ jobs:
           exit 1
 
       - name: Checkout benchmark action repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref }}
           path: action-src
 
       - name: Checkout caller repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           path: repo
@@ -179,14 +179,14 @@ jobs:
           exit 1
 
       - name: Checkout benchmark action repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref }}
           path: action-src
 
       - name: Checkout caller repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           path: repo
@@ -272,7 +272,7 @@ jobs:
           exit 1
 
       - name: Checkout benchmark action repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref }}
