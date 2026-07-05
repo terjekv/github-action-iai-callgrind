@@ -303,7 +303,7 @@ def run_command(
 
 
 def git_checkout(repo_path: pathlib.Path, ref: str) -> None:
-    subprocess.run(["git", "checkout", "--force", ref], cwd=repo_path, check=True)
+    subprocess.run(["git", "checkout", "--force", "--quiet", ref], cwd=repo_path, check=True)
 
 
 def main() -> int:
@@ -313,6 +313,13 @@ def main() -> int:
     parser.add_argument("--benchmark-name", required=True)
     parser.add_argument("--feature-name", required=True)
     parser.add_argument("--command", required=True)
+    parser.add_argument("--head-command")
+    parser.add_argument("--base-command")
+    parser.add_argument("--moved", action="store_true")
+    parser.add_argument("--move-source")
+    parser.add_argument("--move-target")
+    parser.add_argument("--move-ambiguous", action="store_true")
+    parser.add_argument("--move-candidates", default="[]")
     parser.add_argument("--backend", default="iai-callgrind")
     parser.add_argument("--criterion-statistic", default="mean", choices=("mean", "median"))
     parser.add_argument("--head-sha", required=True)
@@ -332,11 +339,14 @@ def main() -> int:
     head_target.mkdir(parents=True, exist_ok=True)
     base_target.mkdir(parents=True, exist_ok=True)
 
+    head_command = args.head_command or args.command
+    base_command = args.base_command or args.command
+
     git_checkout(repo_path, args.head_sha)
-    head = run_command(args.command, workdir, head_target, backend, args.criterion_statistic)
+    head = run_command(head_command, workdir, head_target, backend, args.criterion_statistic)
 
     git_checkout(repo_path, args.base_sha)
-    base = run_command(args.command, workdir, base_target, backend, args.criterion_statistic)
+    base = run_command(base_command, workdir, base_target, backend, args.criterion_statistic)
 
     git_checkout(repo_path, args.head_sha)
 
@@ -354,6 +364,13 @@ def main() -> int:
         "benchmark_name": args.benchmark_name,
         "feature_name": args.feature_name,
         "command": args.command,
+        "head_command": head_command,
+        "base_command": base_command,
+        "moved": bool(args.moved),
+        "move_source": args.move_source,
+        "move_target": args.move_target,
+        "move_ambiguous": bool(args.move_ambiguous),
+        "move_candidates": json.loads(args.move_candidates),
         "base_total": base_total,
         "head_total": head_total,
         "delta": delta,

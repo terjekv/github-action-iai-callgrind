@@ -140,17 +140,24 @@ jobs:
     - `manifest_path`, `package`, `args`: optional command helpers
     - `backend`: optional (`iai-callgrind` or `criterion`) to include spec only for one backend
     - `criterion_args`: optional Criterion bench-binary args for this benchmark
+    - `head_command`, `base_command`, `head`, `base`: optional per-side overrides for moved or renamed benchmarks
 - `auto_discover` (boolean, default `true`)
   - When `benchmarks_json` is empty, discovers benchmarks from `benches/*.rs`.
+  - At a workspace root, also discovers member `benches/*.rs` targets from workspace members.
   - Name-based backend routing for discovery:
     - contains `criterion` (and not `callgrind`) => Criterion only
     - contains `callgrind` (and not `criterion`) => IAI-Callgrind only
     - otherwise => included for both backends
+- `auto_detect_moved_benchmarks` (boolean, default `false`)
+  - Opt-in moved-benchmark detection for autodiscovered workspace benches.
+  - Active only when `auto_discover: true` and `benchmarks_json` is empty.
+  - Pairs moved benchmarks by backend and bench target name when the base candidate is unique.
+  - Renamed or ambiguous benchmark targets should use explicit `benchmarks_json` mapping.
 - `feature_sets_json` (string)
   - JSON array of feature-set objects: `name`, `features`, `no_default_features`.
 - `working_directory` (string, default `.`)
 - `toolchain` (string, default `stable`)
-- `cargo_args` (string, appended to all commands)
+- `cargo_args` (string, appended to Cargo commands before Criterion's `--` separator)
 - `criterion_cli_args` (string, default `--noplot`)
   - Added after `--` for default Criterion commands.
   - This action does not override Criterion's sampling defaults unless you pass additional CLI args.
@@ -177,13 +184,15 @@ By default, benchmarks are expected in Rust's standard `benches/` folder.
 
 You can override this by either:
 
-- Setting `working_directory` for workspace/member layouts.
+- Setting `working_directory` for a specific workspace member.
+- Running at a Cargo workspace root and using autodiscovery for member crates.
 - Providing explicit `benchmarks_json` entries.
 - Using `command` in a benchmark spec for custom invocation.
 
 ## Benchmark autodiscovery
 
 When `benchmarks_json` is empty and `auto_discover: true`, the workflow scans `benches/*.rs`.
+If `working_directory` is a Cargo workspace root, it also scans each workspace member's `benches/*.rs`.
 
 Backend routing is based on the benchmark filename:
 
@@ -205,6 +214,39 @@ Use explicit `benchmarks_json` instead of autodiscovery when:
 - different backends need different command lines
 - benchmarks live outside the default `benches/` layout
 - only a subset of benches should run in CI
+- moved benchmark detection would be ambiguous, or the target was renamed
+
+### Moved benchmarks
+
+If `auto_detect_moved_benchmarks: true` is enabled with autodiscovery, the workflow compares discovered head and base benchmark targets. When the same bench target name moved from one workspace member to another and the base target is unique, the report compares the old base command against the new head command and lists the move.
+
+```yaml
+jobs:
+  bench:
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2
+    with:
+      backend: all
+      auto_discover: true
+      auto_detect_moved_benchmarks: true
+```
+
+For renamed targets or ambiguous moves, use explicit per-side commands:
+
+```yaml
+benchmarks_json: >-
+  [
+    {
+      "name":"parser_callgrind",
+      "backend":"iai-callgrind",
+      "bench":"parser_callgrind_new",
+      "manifest_path":"crates/new-parser/Cargo.toml",
+      "base":{
+        "bench":"parser_callgrind_old",
+        "manifest_path":"crates/old-parser/Cargo.toml"
+      }
+    }
+  ]
+```
 
 ## Notes
 
@@ -222,6 +264,7 @@ Use explicit `benchmarks_json` instead of autodiscovery when:
 - Benchmark command overrides can use placeholders:
   - `{features}`
   - `{no_default_features_flag}`
+- For full `command`/`head_command`/`base_command` overrides, `cargo_args` is appended to the custom command. Put Cargo and Criterion arguments directly in the custom command when argument ordering matters.
 
 ## Criterion defaults and noise
 

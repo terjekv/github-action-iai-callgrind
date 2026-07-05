@@ -208,6 +208,51 @@ class RenderReportTests(unittest.TestCase):
         self.assertIn("### Skipped Benchmarks (Missing in Base/Head)", markdown)
         self.assertIn("missing in base", markdown)
 
+    def test_moved_and_error_entries_are_listed(self) -> None:
+        results = [
+            {
+                "backend": "iai-callgrind",
+                "benchmark_name": "crates/new/parser_callgrind",
+                "feature_name": "default",
+                "base_total": 0,
+                "head_total": 0,
+                "delta_pct": float("nan"),
+                "base_metrics": [],
+                "head_metrics": [],
+                "base_missing": False,
+                "head_missing": False,
+                "base_error": True,
+                "head_error": False,
+                "base_error_code": 101,
+                "moved": True,
+                "move_source": "crates/old",
+                "move_target": "crates/new",
+                "comparison_statistic": "summary",
+                "metric_unit": "events",
+            }
+        ]
+
+        markdown, _ = render_report.render_markdown(
+            results,
+            3.0,
+            "iai-callgrind",
+            None,
+            None,
+            None,
+            [],
+            10,
+            "iai-callgrind-history",
+            None,
+            None,
+            None,
+            False,
+        )
+
+        self.assertIn("### Moved Benchmarks", markdown)
+        self.assertIn("`crates/old` -> `crates/new`", markdown)
+        self.assertIn("### Benchmark Errors", markdown)
+        self.assertIn("base exit 101", markdown)
+
     def test_summary_and_history_templates_can_be_overridden(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             summary_template = pathlib.Path(tmp) / "summary.md.tmpl"

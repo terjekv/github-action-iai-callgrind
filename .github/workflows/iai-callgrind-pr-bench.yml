@@ -30,6 +30,11 @@ on:
         required: false
         type: boolean
         default: true
+      auto_detect_moved_benchmarks:
+        description: Opt-in autodetection for benchmarks moved between workspace members.
+        required: false
+        type: boolean
+        default: false
       feature_sets_json:
         description: >-
           JSON array of feature sets. String entries map to features. Object entries support:
@@ -110,6 +115,7 @@ jobs:
       action_ref: ${{ inputs.action_ref }}
       benchmarks_json: ${{ inputs.benchmarks_json }}
       auto_discover: ${{ inputs.auto_discover }}
+      auto_detect_moved_benchmarks: ${{ inputs.auto_detect_moved_benchmarks }}
       feature_sets_json: ${{ inputs.feature_sets_json }}
       working_directory: ${{ inputs.working_directory }}
       toolchain: ${{ inputs.toolchain }}

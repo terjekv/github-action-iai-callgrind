@@ -30,6 +30,11 @@ on:
         required: false
         type: boolean
         default: true
+      auto_detect_moved_benchmarks:
+        description: Opt-in autodetection for benchmarks moved between workspace members.
+        required: false
+        type: boolean
+        default: false
       feature_sets_json:
         description: >-
           JSON array of feature sets. String entries map to features. Object entries support:
@@ -127,6 +132,22 @@ jobs:
           fetch-depth: 0
           path: repo
 
+      - name: Resolve base SHA
+        id: refs
+        run: |
+          BASE_SHA='${{ inputs.base_sha }}'
+          if [ -z "$BASE_SHA" ]; then
+            BASE_SHA='${{ github.event.pull_request.base.sha }}'
+          fi
+
+          HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+          if [ -z "$HEAD_SHA" ]; then
+            HEAD_SHA='${{ github.sha }}'
+          fi
+
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Build matrix
         id: matrix
         run: |
@@ -138,6 +159,9 @@ jobs:
             --backend "${{ inputs.backend }}" \
             --criterion-cli-args="${{ inputs.criterion_cli_args }}" \
             ${{ inputs.auto_discover && '--auto-discover' || '' }} \
+            ${{ inputs.auto_detect_moved_benchmarks && '--auto-detect-moved-benchmarks' || '' }} \
+            --head-sha "${{ steps.refs.outputs.head_sha }}" \
+            --base-sha "${{ steps.refs.outputs.base_sha }}" \
             --cargo-args "${{ inputs.cargo_args }}" \
             --output matrix.json
 
@@ -153,6 +177,7 @@ jobs:
               '${{ inputs.benchmarks_json }}' \
               '${{ inputs.feature_sets_json }}' \
               '${{ inputs.auto_discover }}' \
+              '${{ inputs.auto_detect_moved_benchmarks }}' \
               '${{ inputs.cargo_args }}' \
               '${{ inputs.criterion_cli_args }}' \
               '${{ inputs.criterion_statistic }}' \
@@ -244,6 +269,13 @@ jobs:
             --benchmark-name "${{ matrix.benchmark_name }}" \
             --feature-name "${{ matrix.feature_name }}" \
             --command "${{ matrix.command }}" \
+            --head-command "${{ matrix.head_command }}" \
+            --base-command "${{ matrix.base_command }}" \
+            ${{ matrix.moved && '--moved' || '' }} \
+            --move-source "${{ matrix.move_source }}" \
+            --move-target "${{ matrix.move_target }}" \
+            ${{ matrix.move_ambiguous && '--move-ambiguous' || '' }} \
+            --move-candidates '${{ toJson(matrix.move_candidates) }}' \
             --backend "${{ matrix.backend }}" \
             --criterion-statistic "${{ inputs.criterion_statistic }}" \
             --head-sha "${{ steps.refs.outputs.head_sha }}" \
@@ -251,13 +283,17 @@ jobs:
             --output artifacts/result.json
 
       - name: Upload result
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-${{ matrix.id }}
-          path: artifacts/result.json
+          path: |
+            artifacts/result.json
+            artifacts/*.error.log
 
   report:
     runs-on: ubuntu-latest
+    if: always() && needs.prepare-matrix.result == 'success'
     needs:
       - prepare-matrix
       - benchmark
