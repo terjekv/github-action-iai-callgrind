@@ -120,14 +120,14 @@ jobs:
           exit 1
 
       - name: Checkout benchmark action repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref }}
           path: action-src
 
       - name: Checkout caller repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: repo
@@ -204,14 +204,14 @@ jobs:
           exit 1
 
       - name: Checkout benchmark action repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref }}
           path: action-src
 
       - name: Checkout caller repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: repo
@@ -284,7 +284,7 @@ jobs:
 
       - name: Upload result
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-${{ matrix.id }}
           path: |
@@ -308,14 +308,14 @@ jobs:
           exit 1
 
       - name: Checkout benchmark action repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref }}
           path: action-src
 
       - name: Download benchmark artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-*
           path: artifacts
@@ -350,7 +350,7 @@ jobs:
 
       - name: Load IAI-Callgrind PR history
         if: github.event_name == 'pull_request' && inputs.backend != 'criterion'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           HISTORY_PATH: history-callgrind.json
           MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- iai-callgrind-bench -->"]'
@@ -369,7 +369,7 @@ jobs:
 
       - name: Load Criterion PR history
         if: github.event_name == 'pull_request' && inputs.backend != 'iai-callgrind'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           HISTORY_PATH: history-criterion.json
           MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- criterion-bench -->"]'
@@ -516,7 +516,7 @@ jobs:
           echo "value=bench-report-${{ inputs.backend }}-${{ github.run_id }}-${{ github.run_attempt }}-$(date +%s%N)" >> "$GITHUB_OUTPUT"
 
       - name: Upload report artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.report_artifact_name.outputs.value }}
           path: |
@@ -530,7 +530,7 @@ jobs:
           inputs.backend != 'criterion' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_callgrind.outputs.has_regressions == 'true'))
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           REPORT_PATH: report-callgrind.md
           PRIMARY_MARKER: "<!-- iai-callgrind-bench -->"
@@ -554,7 +554,7 @@ jobs:
           inputs.backend != 'iai-callgrind' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_criterion.outputs.has_regressions == 'true'))
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           REPORT_PATH: report-criterion.md
           PRIMARY_MARKER: "<!-- criterion-bench -->"
@@ -577,7 +577,7 @@ jobs:
           inputs.backend == 'all' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_overall.outputs.has_regressions == 'true'))
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           REPORT_PATH: report.md
           PRIMARY_MARKER: "<!-- rust-pr-bench -->"
