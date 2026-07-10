@@ -9,6 +9,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 Changelog tracking formally starts with `2.0.0`. Earlier releases, including `v1`, were not backfilled here.
 
+## [2.1.2] - 2026-07-10
+
+### Fixed
+
+- Restrict release automation to full version tags so the floating `v2` and `v2.1` action tags can be maintained safely.
+
 ## [2.1.1] - 2026-07-10
 
 ### Changed

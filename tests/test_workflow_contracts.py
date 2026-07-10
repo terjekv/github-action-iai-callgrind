@@ -61,7 +61,7 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertIn("name: Release", workflow)
         self.assertIn("  push:", workflow)
-        self.assertIn('      - "v*"', workflow)
+        self.assertIn('      - "v*.*.*"', workflow)
         self.assertIn("  contents: write", workflow)
         self.assertIn("uses: softprops/action-gh-release@v3", workflow)
         self.assertIn('version = os.environ["TAG_NAME"].removeprefix("v")', workflow)
