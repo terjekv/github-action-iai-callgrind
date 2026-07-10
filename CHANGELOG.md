@@ -9,6 +9,24 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 Changelog tracking formally starts with `2.0.0`. Earlier releases, including `v1`, were not backfilled here.
 
+## [2.1.1] - 2026-07-10
+
+### Changed
+
+- Updated all versioned GitHub Actions to their latest major releases.
+
+## [2.1.0] - 2026-07-10
+
+### Added
+
+- Added workspace benchmark autodiscovery and moved-benchmark detection.
+
+### Fixed
+
+- Honor workspace exclusions when workspace member declarations use glob patterns.
+- Only compare moved benchmarks when their source is absent from the head revision.
+- Exclude failed benchmark runs from report summaries, averages, regressions, and history.
+
 ## [2.0.2] - 2026-04-20
 
 ### Fixed

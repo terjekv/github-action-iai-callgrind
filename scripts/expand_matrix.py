@@ -4,7 +4,9 @@ import hashlib
 import json
 import pathlib
 import shlex
+import subprocess
 import sys
+import tomllib
 from typing import Any
 
 BACKENDS = ("iai-callgrind", "criterion")
@@ -43,10 +45,62 @@ def infer_name_backend(name: str) -> str | None:
     return None
 
 
-def discover_benchmarks(
-    repo_path: pathlib.Path, working_directory: str, backend_selection: str
+def read_manifest(path: pathlib.Path) -> dict[str, Any]:
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def workspace_member_dirs(workdir: pathlib.Path) -> list[pathlib.Path]:
+    manifest_path = workdir / "Cargo.toml"
+    manifest = read_manifest(manifest_path)
+    dirs: list[pathlib.Path] = []
+
+    if manifest.get("package"):
+        dirs.append(workdir)
+
+    workspace = manifest.get("workspace")
+    members = workspace.get("members", []) if isinstance(workspace, dict) else []
+    exclude = workspace.get("exclude", []) if isinstance(workspace, dict) else []
+    excluded_dirs: set[pathlib.Path] = set()
+    for pattern in exclude:
+        if not isinstance(pattern, str):
+            continue
+        excluded_dirs.update(path.resolve() for path in workdir.glob(pattern))
+    for member in members:
+        if not isinstance(member, str):
+            continue
+        for path in sorted(workdir.glob(member)):
+            if (
+                path.resolve() not in excluded_dirs
+                and (path / "Cargo.toml").exists()
+                and path not in dirs
+            ):
+                dirs.append(path)
+
+    return dirs or [workdir]
+
+
+def package_name(crate_dir: pathlib.Path) -> str | None:
+    package = read_manifest(crate_dir / "Cargo.toml").get("package")
+    if isinstance(package, dict) and package.get("name"):
+        return str(package["name"])
+    return None
+
+
+def relative_path(path: pathlib.Path, start: pathlib.Path) -> str:
+    rel = path.relative_to(start)
+    return "." if rel.as_posix() == "." else rel.as_posix()
+
+
+def discover_crate_benchmarks(
+    repo_path: pathlib.Path,
+    workdir: pathlib.Path,
+    crate_dir: pathlib.Path,
+    backend_selection: str,
 ) -> list[dict[str, Any]]:
-    benches_dir = repo_path / working_directory / "benches"
+    benches_dir = crate_dir / "benches"
     if not benches_dir.exists():
         return []
 
@@ -64,8 +118,99 @@ def discover_benchmarks(
         for backend in candidate_backends:
             if backend not in selected_backends:
                 continue
-            benchmarks.append({"name": path.stem, "bench": path.stem, "backend": backend})
+            crate_rel = relative_path(crate_dir, workdir)
+            repo_rel = relative_path(crate_dir, repo_path)
+            spec: dict[str, Any] = {
+                "name": path.stem if crate_rel == "." else f"{crate_rel}/{path.stem}",
+                "bench": path.stem,
+                "backend": backend,
+                "crate": crate_rel,
+                "repo_crate": repo_rel,
+            }
+            if crate_rel != ".":
+                spec["manifest_path"] = f"{crate_rel}/Cargo.toml"
+            name = package_name(crate_dir)
+            if name:
+                spec["package_name"] = name
+            benchmarks.append(spec)
     return benchmarks
+
+
+def discover_benchmarks(
+    repo_path: pathlib.Path, working_directory: str, backend_selection: str
+) -> list[dict[str, Any]]:
+    workdir = repo_path / working_directory
+    benchmarks: list[dict[str, Any]] = []
+    for crate_dir in workspace_member_dirs(workdir):
+        benchmarks.extend(discover_crate_benchmarks(repo_path, workdir, crate_dir, backend_selection))
+    return benchmarks
+
+
+def git_checkout(repo_path: pathlib.Path, ref: str) -> None:
+    subprocess.run(["git", "checkout", "--force", "--quiet", ref], cwd=repo_path, check=True)
+
+
+def discover_at_ref(
+    repo_path: pathlib.Path,
+    working_directory: str,
+    backend_selection: str,
+    ref: str,
+) -> list[dict[str, Any]]:
+    git_checkout(repo_path, ref)
+    return discover_benchmarks(repo_path, working_directory, backend_selection)
+
+
+def move_key(spec: dict[str, Any]) -> tuple[str, str]:
+    return (normalize_backend(str(spec.get("backend", "iai-callgrind"))), str(spec.get("bench", "")))
+
+
+def benchmark_location(spec: dict[str, Any]) -> tuple[str, str, str]:
+    return (*move_key(spec), str(spec.get("repo_crate", "")))
+
+
+def pair_moved_benchmarks(
+    head_benchmarks: list[dict[str, Any]], base_benchmarks: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    head_locations = {benchmark_location(spec) for spec in head_benchmarks}
+    base_by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for spec in base_benchmarks:
+        # A source must be gone from head before it can be considered a move.
+        # This prevents a newly added same-named benchmark from being compared
+        # with an unrelated benchmark that still exists in another crate.
+        if benchmark_location(spec) not in head_locations:
+            base_by_key.setdefault(move_key(spec), []).append(spec)
+
+    paired: list[dict[str, Any]] = []
+    for head in head_benchmarks:
+        candidates = base_by_key.get(move_key(head), [])
+        if not candidates:
+            paired.append(head)
+            continue
+
+        head_package = head.get("package_name")
+        package_matches = [item for item in candidates if item.get("package_name") == head_package]
+        selected: dict[str, Any] | None = None
+        if len(package_matches) == 1:
+            selected = package_matches[0]
+        elif len(candidates) == 1:
+            selected = candidates[0]
+
+        if selected and selected.get("repo_crate") != head.get("repo_crate"):
+            item = dict(head)
+            item["base"] = selected
+            item["moved"] = True
+            item["move_source"] = selected.get("repo_crate")
+            item["move_target"] = head.get("repo_crate")
+            paired.append(item)
+            candidates.remove(selected)
+        elif selected:
+            paired.append(head)
+        else:
+            item = dict(head)
+            item["move_ambiguous"] = True
+            item["move_candidates"] = [candidate.get("repo_crate") for candidate in candidates]
+            paired.append(item)
+    return paired
 
 
 def normalize_feature_sets(raw: Any) -> list[dict[str, Any]]:
@@ -132,16 +277,32 @@ def build_command(
         extra_args = spec.get("args")
         if extra_args:
             parts.append(str(extra_args))
+        if cargo_args.strip():
+            parts.append(cargo_args.strip())
         if backend == "criterion":
             criterion_args = str(spec.get("criterion_args", criterion_cli_args)).strip()
             if criterion_args:
                 parts.extend(["--", criterion_args])
         command = " ".join(parts)
 
-    if cargo_args.strip():
+    if command and spec.get("command") and cargo_args.strip():
         command = f"{command} {cargo_args.strip()}"
 
     return " ".join(command.split())
+
+
+def command_spec(spec: dict[str, Any], side: str) -> dict[str, Any]:
+    nested = spec.get(side)
+    if isinstance(nested, dict):
+        merged = dict(spec)
+        merged.update(nested)
+        return merged
+    key = f"{side}_command"
+    if spec.get(key):
+        merged = dict(spec)
+        merged["command"] = spec[key]
+        return merged
+    return spec
 
 
 def expand_benchmark_entry(entry: Any, backend_selection: str) -> list[dict[str, Any]]:
@@ -196,6 +357,25 @@ def make_matrix(
                     "command": build_command(
                         bench, feature_set, cargo_args, backend, criterion_cli_args
                     ),
+                    "head_command": build_command(
+                        command_spec(bench, "head"),
+                        feature_set,
+                        cargo_args,
+                        backend,
+                        criterion_cli_args,
+                    ),
+                    "base_command": build_command(
+                        command_spec(bench, "base"),
+                        feature_set,
+                        cargo_args,
+                        backend,
+                        criterion_cli_args,
+                    ),
+                    "moved": bool(bench.get("moved")),
+                    "move_source": bench.get("move_source"),
+                    "move_target": bench.get("move_target"),
+                    "move_ambiguous": bool(bench.get("move_ambiguous")),
+                    "move_candidates": bench.get("move_candidates", []),
                 }
             )
     return {"include": include}
@@ -228,6 +408,9 @@ def main() -> int:
     parser.add_argument("--backend", default="iai-callgrind")
     parser.add_argument("--criterion-cli-args", default="--noplot")
     parser.add_argument("--auto-discover", action="store_true")
+    parser.add_argument("--auto-detect-moved-benchmarks", action="store_true")
+    parser.add_argument("--head-sha")
+    parser.add_argument("--base-sha")
     parser.add_argument("--cargo-args", default="")
     parser.add_argument("--output", required=True)
     parsed_argv = normalize_option_values(
@@ -249,7 +432,16 @@ def main() -> int:
         benchmarks.extend(expand_benchmark_entry(entry, backend_selection))
 
     if args.auto_discover and not benchmarks:
-        benchmarks = discover_benchmarks(repo_path, args.working_directory, backend_selection)
+        if args.auto_detect_moved_benchmarks and args.head_sha and args.base_sha:
+            git_checkout(repo_path, args.head_sha)
+            head_benchmarks = discover_benchmarks(repo_path, args.working_directory, backend_selection)
+            base_benchmarks = discover_at_ref(
+                repo_path, args.working_directory, backend_selection, args.base_sha
+            )
+            git_checkout(repo_path, args.head_sha)
+            benchmarks = pair_moved_benchmarks(head_benchmarks, base_benchmarks)
+        else:
+            benchmarks = discover_benchmarks(repo_path, args.working_directory, backend_selection)
 
     if not benchmarks:
         print(

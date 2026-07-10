@@ -118,9 +118,14 @@ def compute_feature_summary(
     metric_deltas: list[float] = []
 
     for entry in entries:
-        if entry.get("head_missing") or entry.get("base_missing"):
+        if entry.get("head_error") or entry.get("base_error"):
             continue
-        status, is_regression = classify(entry["delta_pct"], threshold)
+        elif entry.get("head_missing") or entry.get("base_missing"):
+            continue
+        else:
+            status, is_regression = classify(entry["delta_pct"], threshold)
+            bench_deltas.append(float(entry["delta_pct"]))
+            metric_deltas.extend(collect_metric_deltas(entry))
         if is_regression:
             regressions += 1
             has_regressions = True
@@ -128,8 +133,6 @@ def compute_feature_summary(
             improved += 1
         else:
             neutral += 1
-        bench_deltas.append(float(entry["delta_pct"]))
-        metric_deltas.extend(collect_metric_deltas(entry))
 
     return (
         improved,
@@ -143,6 +146,20 @@ def compute_feature_summary(
 
 def render_metric_breakdown(entry: dict[str, Any], threshold: float) -> list[str]:
     lines: list[str] = []
+    if entry.get("head_error") or entry.get("base_error"):
+        labels = []
+        if entry.get("head_error"):
+            labels.append("head error")
+        if entry.get("base_error"):
+            labels.append("base error")
+        reason_text = " and ".join(labels) if labels else "error"
+        lines.append(f"<details><summary>{entry['benchmark_name']} metric breakdown (error)</summary>")
+        lines.append("")
+        lines.append(f"Skipped metric breakdown ({reason_text}).")
+        lines.append("")
+        lines.append("</details>")
+        return lines
+
     if entry.get("head_missing") or entry.get("base_missing"):
         reasons = []
         if entry.get("head_missing"):
@@ -278,7 +295,12 @@ def render_markdown(
             total_regressions += regressions
             total_neutral += neutral
             for entry in grouped[feature_name]:
-                if entry.get("head_missing") or entry.get("base_missing"):
+                if (
+                    entry.get("head_error")
+                    or entry.get("base_error")
+                    or entry.get("head_missing")
+                    or entry.get("base_missing")
+                ):
                     continue
                 all_bench_deltas.append(float(entry["delta_pct"]))
                 all_metric_deltas.extend(collect_metric_deltas(entry))
@@ -291,7 +313,9 @@ def render_markdown(
 
             sorted_entries = sorted(grouped[feature_name], key=lambda e: e["benchmark_name"])
             for entry in sorted_entries:
-                if entry.get("head_missing") or entry.get("base_missing"):
+                if entry.get("head_error") or entry.get("base_error"):
+                    status = "🔴 error"
+                elif entry.get("head_missing") or entry.get("base_missing"):
                     status = "⚪ missing"
                 else:
                     status, _ = classify(entry["delta_pct"], threshold)
@@ -331,6 +355,8 @@ def render_markdown(
     if has_regressions:
         regression_lines: list[str] = []
         for entry in sorted(results, key=lambda e: e["delta_pct"], reverse=True):
+            if entry.get("head_error") or entry.get("base_error"):
+                continue
             _, is_regression = classify(entry["delta_pct"], threshold)
             if not is_regression:
                 continue
@@ -345,6 +371,50 @@ def render_markdown(
             regressions_block = (
                 "### Regressions Above Threshold\n\n" + "\n".join(regression_lines) + "\n\n"
             )
+
+    moved_entries = [entry for entry in results if entry.get("moved") or entry.get("move_ambiguous")]
+    moved_block = ""
+    if moved_entries:
+        moved_lines: list[str] = []
+        for entry in sorted(moved_entries, key=lambda e: e["benchmark_name"]):
+            if entry.get("moved"):
+                moved_lines.append(
+                    "- `{feature}` / `{bench}`: compared moved benchmark `{source}` -> `{target}`".format(
+                        feature=entry["feature_name"],
+                        bench=entry["benchmark_name"],
+                        source=entry.get("move_source") or "base",
+                        target=entry.get("move_target") or "head",
+                    )
+                )
+            else:
+                candidates = ", ".join(str(item) for item in entry.get("move_candidates", []))
+                moved_lines.append(
+                    "- `{feature}` / `{bench}`: move detection was ambiguous ({candidates})".format(
+                        feature=entry["feature_name"],
+                        bench=entry["benchmark_name"],
+                        candidates=candidates or "no unique candidate",
+                    )
+                )
+        moved_block = "### Moved Benchmarks\n\n" + "\n".join(moved_lines) + "\n\n"
+
+    error_entries = [entry for entry in results if entry.get("head_error") or entry.get("base_error")]
+    error_block = ""
+    if error_entries:
+        error_lines: list[str] = []
+        for entry in sorted(error_entries, key=lambda e: e["benchmark_name"]):
+            reasons = []
+            if entry.get("head_error"):
+                reasons.append(f"head exit {entry.get('head_error_code')}")
+            if entry.get("base_error"):
+                reasons.append(f"base exit {entry.get('base_error_code')}")
+            error_lines.append(
+                "- `{feature}` / `{bench}`: {reason}".format(
+                    feature=entry["feature_name"],
+                    bench=entry["benchmark_name"],
+                    reason=", ".join(reasons),
+                )
+            )
+        error_block = "### Benchmark Errors\n\n" + "\n".join(error_lines) + "\n\n"
 
     missing_entries = [entry for entry in results if entry.get("head_missing") or entry.get("base_missing")]
     missing_block = ""
@@ -467,7 +537,7 @@ def render_markdown(
         summary_section=summary_section,
         feature_sections=feature_sections_text,
         regressions_block=regressions_block,
-        missing_block=missing_block,
+        missing_block=moved_block + error_block + missing_block,
         history_section=history_section,
         history_marker_key=history_marker_key,
         history_payload=history_payload,

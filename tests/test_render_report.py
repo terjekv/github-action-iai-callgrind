@@ -208,6 +208,80 @@ class RenderReportTests(unittest.TestCase):
         self.assertIn("### Skipped Benchmarks (Missing in Base/Head)", markdown)
         self.assertIn("missing in base", markdown)
 
+    def test_moved_and_error_entries_are_listed(self) -> None:
+        results = [
+            {
+                "backend": "iai-callgrind",
+                "benchmark_name": "crates/new/parser_callgrind",
+                "feature_name": "default",
+                "base_total": 0,
+                "head_total": 0,
+                "delta_pct": float("nan"),
+                "base_metrics": [],
+                "head_metrics": [],
+                "base_missing": False,
+                "head_missing": False,
+                "base_error": True,
+                "head_error": False,
+                "base_error_code": 101,
+                "moved": True,
+                "move_source": "crates/old",
+                "move_target": "crates/new",
+                "comparison_statistic": "summary",
+                "metric_unit": "events",
+            }
+        ]
+
+        markdown, _ = render_report.render_markdown(
+            results,
+            3.0,
+            "iai-callgrind",
+            None,
+            None,
+            None,
+            [],
+            10,
+            "iai-callgrind-history",
+            None,
+            None,
+            None,
+            False,
+        )
+
+        self.assertIn("### Moved Benchmarks", markdown)
+        self.assertIn("`crates/old` -> `crates/new`", markdown)
+        self.assertIn("### Benchmark Errors", markdown)
+        self.assertIn("base exit 101", markdown)
+
+    def test_failed_entries_are_excluded_from_summary_and_history_aggregates(self) -> None:
+        failed = {
+            "backend": "iai-callgrind",
+            "benchmark_name": "failed",
+            "feature_name": "default",
+            "base_total": 100,
+            "head_total": 0,
+            "delta_pct": -100.0,
+            "base_metrics": [{"metric": "instructions", "value": 100}],
+            "head_metrics": [],
+            "base_missing": False,
+            "head_missing": False,
+            "head_error": True,
+            "comparison_statistic": "summary",
+            "metric_unit": "events",
+        }
+        successful = dict(callgrind_results()[0])
+        successful["feature_name"] = "default"
+
+        _, summary = render_report.render_markdown(
+            [failed, successful], 3.0, "iai-callgrind", None, "head", None, [], 10,
+            "iai-callgrind-history", None, None, None, False,
+        )
+
+        latest = summary["latest"]
+        self.assertEqual(latest["summary"], {"improved": 0, "regressions": 1, "neutral": 0})
+        self.assertEqual(latest["avg_bench_delta_pct"], 10.0)
+        self.assertEqual(latest["avg_metric_delta_pct"], 10.0)
+
     def test_summary_and_history_templates_can_be_overridden(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             summary_template = pathlib.Path(tmp) / "summary.md.tmpl"
