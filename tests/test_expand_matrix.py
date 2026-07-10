@@ -64,6 +64,26 @@ class ExpandMatrixTests(unittest.TestCase):
                 },
             )
 
+    def test_discover_benchmarks_honors_globbed_workspace_excludes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            (repo / "Cargo.toml").write_text(
+                '[workspace]\nmembers = ["crates/*"]\nexclude = ["crates/example"]\n',
+                encoding="utf-8",
+            )
+            for crate_name in ("included", "example"):
+                crate = repo / "crates" / crate_name
+                (crate / "benches").mkdir(parents=True)
+                (crate / "Cargo.toml").write_text(
+                    f'[package]\nname = "{crate_name}"\nversion = "0.1.0"\nedition = "2021"\n',
+                    encoding="utf-8",
+                )
+                (crate / "benches" / "shared_callgrind.rs").write_text("// bench\n", encoding="utf-8")
+
+            discovered = expand_matrix.discover_benchmarks(repo, ".", "iai-callgrind")
+
+            self.assertEqual([item["name"] for item in discovered], ["crates/included/shared_callgrind"])
+
     def test_build_command_appends_criterion_args_only_for_criterion(self) -> None:
         spec = {"name": "bench_a", "bench": "bench_a"}
         feature_set = {"name": "default", "features": "", "no_default_features": False}
@@ -121,6 +141,35 @@ class ExpandMatrixTests(unittest.TestCase):
         self.assertEqual(paired[0]["base"]["manifest_path"], "crates/old/Cargo.toml")
         self.assertEqual(paired[0]["move_source"], "crates/old")
         self.assertEqual(paired[0]["move_target"], "crates/new")
+
+    def test_pair_moved_benchmarks_requires_source_to_be_absent_from_head(self) -> None:
+        head = [
+            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/old"},
+            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/new"},
+        ]
+        base = [
+            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/old"}
+        ]
+
+        paired = expand_matrix.pair_moved_benchmarks(head, base)
+
+        self.assertNotIn("moved", paired[1])
+        self.assertNotIn("base", paired[1])
+
+    def test_pair_moved_benchmarks_uses_a_base_source_only_once(self) -> None:
+        head = [
+            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/new-a"},
+            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/new-b"},
+        ]
+        base = [
+            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/old"}
+        ]
+
+        paired = expand_matrix.pair_moved_benchmarks(head, base)
+
+        self.assertTrue(paired[0]["moved"])
+        self.assertNotIn("moved", paired[1])
+        self.assertNotIn("base", paired[1])
 
     def test_make_matrix_emits_distinct_base_command_for_move(self) -> None:
         feature_sets = [{"name": "default", "features": "", "no_default_features": False}]

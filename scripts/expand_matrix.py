@@ -62,12 +62,21 @@ def workspace_member_dirs(workdir: pathlib.Path) -> list[pathlib.Path]:
 
     workspace = manifest.get("workspace")
     members = workspace.get("members", []) if isinstance(workspace, dict) else []
-    exclude = set(workspace.get("exclude", [])) if isinstance(workspace, dict) else set()
+    exclude = workspace.get("exclude", []) if isinstance(workspace, dict) else []
+    excluded_dirs: set[pathlib.Path] = set()
+    for pattern in exclude:
+        if not isinstance(pattern, str):
+            continue
+        excluded_dirs.update(path.resolve() for path in workdir.glob(pattern))
     for member in members:
-        if not isinstance(member, str) or member in exclude:
+        if not isinstance(member, str):
             continue
         for path in sorted(workdir.glob(member)):
-            if (path / "Cargo.toml").exists() and path not in dirs:
+            if (
+                path.resolve() not in excluded_dirs
+                and (path / "Cargo.toml").exists()
+                and path not in dirs
+            ):
                 dirs.append(path)
 
     return dirs or [workdir]
@@ -155,12 +164,21 @@ def move_key(spec: dict[str, Any]) -> tuple[str, str]:
     return (normalize_backend(str(spec.get("backend", "iai-callgrind"))), str(spec.get("bench", "")))
 
 
+def benchmark_location(spec: dict[str, Any]) -> tuple[str, str, str]:
+    return (*move_key(spec), str(spec.get("repo_crate", "")))
+
+
 def pair_moved_benchmarks(
     head_benchmarks: list[dict[str, Any]], base_benchmarks: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    head_locations = {benchmark_location(spec) for spec in head_benchmarks}
     base_by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for spec in base_benchmarks:
-        base_by_key.setdefault(move_key(spec), []).append(spec)
+        # A source must be gone from head before it can be considered a move.
+        # This prevents a newly added same-named benchmark from being compared
+        # with an unrelated benchmark that still exists in another crate.
+        if benchmark_location(spec) not in head_locations:
+            base_by_key.setdefault(move_key(spec), []).append(spec)
 
     paired: list[dict[str, Any]] = []
     for head in head_benchmarks:
@@ -184,6 +202,7 @@ def pair_moved_benchmarks(
             item["move_source"] = selected.get("repo_crate")
             item["move_target"] = head.get("repo_crate")
             paired.append(item)
+            candidates.remove(selected)
         elif selected:
             paired.append(head)
         else:

@@ -253,6 +253,35 @@ class RenderReportTests(unittest.TestCase):
         self.assertIn("### Benchmark Errors", markdown)
         self.assertIn("base exit 101", markdown)
 
+    def test_failed_entries_are_excluded_from_summary_and_history_aggregates(self) -> None:
+        failed = {
+            "backend": "iai-callgrind",
+            "benchmark_name": "failed",
+            "feature_name": "default",
+            "base_total": 100,
+            "head_total": 0,
+            "delta_pct": -100.0,
+            "base_metrics": [{"metric": "instructions", "value": 100}],
+            "head_metrics": [],
+            "base_missing": False,
+            "head_missing": False,
+            "head_error": True,
+            "comparison_statistic": "summary",
+            "metric_unit": "events",
+        }
+        successful = dict(callgrind_results()[0])
+        successful["feature_name"] = "default"
+
+        _, summary = render_report.render_markdown(
+            [failed, successful], 3.0, "iai-callgrind", None, "head", None, [], 10,
+            "iai-callgrind-history", None, None, None, False,
+        )
+
+        latest = summary["latest"]
+        self.assertEqual(latest["summary"], {"improved": 0, "regressions": 1, "neutral": 0})
+        self.assertEqual(latest["avg_bench_delta_pct"], 10.0)
+        self.assertEqual(latest["avg_metric_delta_pct"], 10.0)
+
     def test_summary_and_history_templates_can_be_overridden(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             summary_template = pathlib.Path(tmp) / "summary.md.tmpl"

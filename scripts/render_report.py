@@ -119,8 +119,7 @@ def compute_feature_summary(
 
     for entry in entries:
         if entry.get("head_error") or entry.get("base_error"):
-            status = "🔴 error"
-            is_regression = False
+            continue
         elif entry.get("head_missing") or entry.get("base_missing"):
             continue
         else:
@@ -296,7 +295,12 @@ def render_markdown(
             total_regressions += regressions
             total_neutral += neutral
             for entry in grouped[feature_name]:
-                if entry.get("head_missing") or entry.get("base_missing"):
+                if (
+                    entry.get("head_error")
+                    or entry.get("base_error")
+                    or entry.get("head_missing")
+                    or entry.get("base_missing")
+                ):
                     continue
                 all_bench_deltas.append(float(entry["delta_pct"]))
                 all_metric_deltas.extend(collect_metric_deltas(entry))
@@ -351,6 +355,8 @@ def render_markdown(
     if has_regressions:
         regression_lines: list[str] = []
         for entry in sorted(results, key=lambda e: e["delta_pct"], reverse=True):
+            if entry.get("head_error") or entry.get("base_error"):
+                continue
             _, is_regression = classify(entry["delta_pct"], threshold)
             if not is_regression:
                 continue
