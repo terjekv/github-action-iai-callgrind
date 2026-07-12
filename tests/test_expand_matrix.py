@@ -202,6 +202,35 @@ class ExpandMatrixTests(unittest.TestCase):
         )
         self.assertTrue(item["moved"])
 
+    def test_make_matrix_does_not_inherit_head_manifest_for_move_from_root(self) -> None:
+        feature_sets = [{"name": "default", "features": "", "no_default_features": False}]
+        benchmarks = [
+            {
+                "name": "crates/parser/parser_callgrind",
+                "bench": "parser_callgrind",
+                "backend": "iai-callgrind",
+                "manifest_path": "crates/parser/Cargo.toml",
+                "base": {
+                    "name": "parser_callgrind",
+                    "bench": "parser_callgrind",
+                    "backend": "iai-callgrind",
+                    "repo_crate": ".",
+                },
+                "moved": True,
+                "move_source": ".",
+                "move_target": "crates/parser",
+            }
+        ]
+
+        matrix = expand_matrix.make_matrix(benchmarks, feature_sets, "", "--noplot")
+        item = matrix["include"][0]
+
+        self.assertEqual(
+            item["head_command"],
+            "cargo bench --bench parser_callgrind --manifest-path crates/parser/Cargo.toml",
+        )
+        self.assertEqual(item["base_command"], "cargo bench --bench parser_callgrind")
+
     def test_cli_auto_detects_moved_workspace_benchmark(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = pathlib.Path(tmp)

@@ -9,6 +9,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 Changelog tracking formally starts with `2.0.0`. Earlier releases, including `v1`, were not backfilled here.
 
+### Fixed
+
+- Prevent moved benchmarks from inheriting the head revision's manifest path when their base source is the workspace root.
+
 ## [2.1.2] - 2026-07-10
 
 ### Fixed

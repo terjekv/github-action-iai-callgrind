@@ -294,6 +294,11 @@ def build_command(
 def command_spec(spec: dict[str, Any], side: str) -> dict[str, Any]:
     nested = spec.get(side)
     if isinstance(nested, dict):
+        # Move detection stores a complete base-side discovery result. Merging
+        # it over the head spec would retain head-only fields that are absent
+        # at the old location, such as a workspace member's manifest_path.
+        if side == "base" and spec.get("moved"):
+            return dict(nested)
         merged = dict(spec)
         merged.update(nested)
         return merged
