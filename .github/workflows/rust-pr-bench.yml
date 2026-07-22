@@ -92,15 +92,29 @@ on:
         type: number
         default: -1
       fail_on_regression:
-        description: Fail workflow if any case regresses above threshold.
+        description: Fail workflow if any unaccepted case regresses above threshold.
         required: false
         type: boolean
         default: false
+      regression_override_label:
+        description: >-
+          Exact PR label required to activate PR-body regression exceptions. Empty disables
+          regression exceptions.
+        required: false
+        type: string
+        default: ""
       comment_mode:
         description: PR comment behavior (always, on-regression, never).
         required: false
         type: string
         default: always
+    outputs:
+      has_regressions:
+        description: Whether the latest run measured any regressions above threshold.
+        value: ${{ jobs.report.outputs.has_regressions }}
+      has_unaccepted_regressions:
+        description: Whether the latest run has regressions not covered by an approved exception.
+        value: ${{ jobs.report.outputs.has_unaccepted_regressions }}
 
 permissions:
   contents: read
@@ -111,7 +125,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
       artifact_prefix: ${{ steps.artifact_prefix.outputs.value }}
+      binary_artifact_prefix: ${{ steps.artifact_prefix.outputs.binary_value }}
+      base_sha: ${{ steps.refs.outputs.base_sha }}
+      head_sha: ${{ steps.refs.outputs.head_sha }}
     steps:
       - name: Validate action source inputs
         if: ${{ inputs.action_repository != 'terjekv/github-action-iai-callgrind' && inputs.action_ref == '' }}
@@ -163,9 +181,11 @@ jobs:
             --head-sha "${{ steps.refs.outputs.head_sha }}" \
             --base-sha "${{ steps.refs.outputs.base_sha }}" \
             --cargo-args "${{ inputs.cargo_args }}" \
-            --output matrix.json
+            --output matrix.json \
+            --build-output build-matrix.json
 
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "build_matrix=$(cat build-matrix.json)" >> "$GITHUB_OUTPUT"
 
       - name: Build artifact prefix
         id: artifact_prefix
@@ -188,10 +208,66 @@ jobs:
           )"
           HASH="$(printf '%s' "$INPUT_FINGERPRINT" | sha256sum | cut -c1-12)"
           echo "value=bench-result-${HASH}" >> "$GITHUB_OUTPUT"
+          echo "binary_value=bench-binary-${HASH}" >> "$GITHUB_OUTPUT"
+
+  precompile:
+    runs-on: ubuntu-latest
+    needs: prepare-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.build_matrix) }}
+
+    steps:
+      - name: Checkout benchmark action repository
+        if: matrix.enabled
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.action_repository }}
+          ref: ${{ inputs.action_ref }}
+          path: action-src
+
+      - name: Checkout caller repository
+        if: matrix.enabled
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: repo
+
+      - name: Install Rust
+        if: matrix.enabled
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Precompile benchmark executables
+        if: matrix.enabled
+        env:
+          CASES_JSON: ${{ toJson(matrix.cases) }}
+          BENCHMARK_REF: ${{ matrix.side == 'head' && needs.prepare-matrix.outputs.head_sha || needs.prepare-matrix.outputs.base_sha }}
+        run: |
+          python3 action-src/scripts/precompile_benchmarks.py \
+            --repo-path repo \
+            --working-directory "${{ inputs.working_directory }}" \
+            --ref "$BENCHMARK_REF" \
+            --target-dir "repo/.bench-target/precompile/${{ matrix.group_id }}/${{ matrix.side }}" \
+            --cases-json "$CASES_JSON" \
+            --output precompiled
+
+      - name: Upload benchmark executables
+        if: matrix.enabled
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.group_id }}-${{ matrix.side }}
+          path: precompiled
 
   benchmark:
     runs-on: ubuntu-latest
-    needs: prepare-matrix
+    if: >-
+      always() &&
+      needs.prepare-matrix.result == 'success'
+    needs:
+      - prepare-matrix
+      - precompile
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
@@ -260,17 +336,71 @@ jobs:
             sudo apt-get install -y valgrind
           fi
 
+      - name: Download precompiled head benchmark
+        if: matrix.precompile
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.build_group_id }}-head
+          path: precompiled/head
+
+      - name: Download precompiled base benchmark
+        if: matrix.precompile
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.build_group_id }}-base
+          path: precompiled/base
+
       - name: Run benchmark pair
+        env:
+          ORIGINAL_HEAD_COMMAND: ${{ matrix.head_command }}
+          ORIGINAL_BASE_COMMAND: ${{ matrix.base_command }}
+          HEAD_RUN_ARGS: ${{ matrix.head_run_args }}
+          BASE_RUN_ARGS: ${{ matrix.base_run_args }}
         run: |
           mkdir -p artifacts
+          HEAD_COMMAND="$ORIGINAL_HEAD_COMMAND"
+          BASE_COMMAND="$ORIGINAL_BASE_COMMAND"
+          HEAD_BINARY="$GITHUB_WORKSPACE/precompiled/head/${{ matrix.id }}/benchmark"
+          BASE_BINARY="$GITHUB_WORKSPACE/precompiled/base/${{ matrix.id }}/benchmark"
+          HEAD_RUNTIME="$GITHUB_WORKSPACE/precompiled/head/_runtime"
+          BASE_RUNTIME="$GITHUB_WORKSPACE/precompiled/base/_runtime"
+          HEAD_PREBUILD_TARGET="$GITHUB_WORKSPACE/repo/.bench-target/precompile/${{ matrix.build_group_id }}/head"
+          BASE_PREBUILD_TARGET="$GITHUB_WORKSPACE/repo/.bench-target/precompile/${{ matrix.build_group_id }}/base"
+          RUST_HOST="$(rustc -vV | sed -n 's/^host: //p')"
+          RUST_SYSROOT="$(rustc --print sysroot)"
+          RUST_LIBRARY_PATH="$RUST_SYSROOT/lib/rustlib/$RUST_HOST/lib"
+          if [ -d "$HEAD_RUNTIME" ]; then
+            mkdir -p "$HEAD_PREBUILD_TARGET"
+            cp -R "$HEAD_RUNTIME"/. "$HEAD_PREBUILD_TARGET"/
+          fi
+          if [ -d "$BASE_RUNTIME" ]; then
+            mkdir -p "$BASE_PREBUILD_TARGET"
+            cp -R "$BASE_RUNTIME"/. "$BASE_PREBUILD_TARGET"/
+          fi
+          if [ -f "$HEAD_BINARY" ]; then
+            chmod +x "$HEAD_BINARY"
+            printf -v HEAD_BINARY_QUOTED '%q' "$HEAD_BINARY"
+            HEAD_LIBRARY_PATH="$HEAD_PREBUILD_TARGET/release/deps:$HEAD_PREBUILD_TARGET/release:$RUST_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            printf -v HEAD_LIBRARY_PATH_QUOTED '%q' "$HEAD_LIBRARY_PATH"
+            HEAD_COMMAND="env LD_LIBRARY_PATH=$HEAD_LIBRARY_PATH_QUOTED $HEAD_BINARY_QUOTED${HEAD_RUN_ARGS:+ $HEAD_RUN_ARGS}"
+          fi
+          if [ -f "$BASE_BINARY" ]; then
+            chmod +x "$BASE_BINARY"
+            printf -v BASE_BINARY_QUOTED '%q' "$BASE_BINARY"
+            BASE_LIBRARY_PATH="$BASE_PREBUILD_TARGET/release/deps:$BASE_PREBUILD_TARGET/release:$RUST_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            printf -v BASE_LIBRARY_PATH_QUOTED '%q' "$BASE_LIBRARY_PATH"
+            BASE_COMMAND="env LD_LIBRARY_PATH=$BASE_LIBRARY_PATH_QUOTED $BASE_BINARY_QUOTED${BASE_RUN_ARGS:+ $BASE_RUN_ARGS}"
+          fi
           python3 action-src/scripts/run_pair.py \
             --repo-path repo \
             --working-directory "${{ inputs.working_directory }}" \
             --benchmark-name "${{ matrix.benchmark_name }}" \
             --feature-name "${{ matrix.feature_name }}" \
             --command "${{ matrix.command }}" \
-            --head-command "${{ matrix.head_command }}" \
-            --base-command "${{ matrix.base_command }}" \
+            --head-command "$HEAD_COMMAND" \
+            --base-command "$BASE_COMMAND" \
             ${{ matrix.moved && '--moved' || '' }} \
             --move-source "${{ matrix.move_source }}" \
             --move-target "${{ matrix.move_target }}" \
@@ -299,6 +429,7 @@ jobs:
       - benchmark
     outputs:
       has_regressions: ${{ steps.render_overall.outputs.has_regressions }}
+      has_unaccepted_regressions: ${{ steps.render_overall.outputs.has_unaccepted_regressions }}
 
     steps:
       - name: Validate action source inputs
@@ -386,6 +517,35 @@ jobs:
               markers: JSON.parse(process.env.MARKERS_JSON),
             });
 
+      - name: Load current PR regression override metadata
+        if: github.event_name == 'pull_request' && inputs.regression_override_label != ''
+        uses: actions/github-script@v9
+        env:
+          METADATA_PATH: pr-regression-overrides.json
+          APPROVAL_LABEL: ${{ inputs.regression_override_label }}
+        with:
+          script: |
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.loadPullRequestMetadata({
+              github,
+              context,
+              metadataPath: process.env.METADATA_PATH,
+              approvalLabel: process.env.APPROVAL_LABEL,
+            });
+
+      - name: Prepare regression overrides
+        env:
+          REGRESSION_OVERRIDE_LABEL: ${{ inputs.regression_override_label }}
+        run: |
+          METADATA_ARG=()
+          if [ -f pr-regression-overrides.json ]; then
+            METADATA_ARG=(--pr-metadata pr-regression-overrides.json)
+          fi
+          python3 action-src/scripts/regression_overrides.py \
+            "${METADATA_ARG[@]}" \
+            --approval-label "$REGRESSION_OVERRIDE_LABEL" \
+            --output regression-overrides.json
+
       - name: Resolve report metadata
         id: report_meta
         run: |
@@ -431,6 +591,7 @@ jobs:
             --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
             --run-at "${{ steps.report_meta.outputs.run_at }}" \
             --max-history 10 \
+            --regression-overrides-input regression-overrides.json \
             $HISTORY_ARG \
             $PR_ARG \
             $OMIT_RUN_META_ARG
@@ -439,6 +600,7 @@ jobs:
             cat report-callgrind.md >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+          echo "has_unaccepted_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_unaccepted_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
 
       - name: Render Criterion report
         id: render_criterion
@@ -471,6 +633,7 @@ jobs:
             --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
             --run-at "${{ steps.report_meta.outputs.run_at }}" \
             --max-history 10 \
+            --regression-overrides-input regression-overrides.json \
             $HISTORY_ARG \
             $PR_ARG \
             $OMIT_RUN_META_ARG
@@ -479,6 +642,7 @@ jobs:
             cat report-criterion.md >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+          echo "has_unaccepted_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_unaccepted_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
 
       - name: Compose combined report (backend=all)
         if: inputs.backend == 'all'
@@ -502,13 +666,21 @@ jobs:
         id: render_overall
         run: |
           HAS_REGRESSIONS=false
+          HAS_UNACCEPTED_REGRESSIONS=false
           if [ -f summary-callgrind.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_regressions"]).lower())')" = "true" ]; then
             HAS_REGRESSIONS=true
+          fi
+          if [ -f summary-callgrind.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_unaccepted_regressions"]).lower())')" = "true" ]; then
+            HAS_UNACCEPTED_REGRESSIONS=true
           fi
           if [ -f summary-criterion.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_regressions"]).lower())')" = "true" ]; then
             HAS_REGRESSIONS=true
           fi
+          if [ -f summary-criterion.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_unaccepted_regressions"]).lower())')" = "true" ]; then
+            HAS_UNACCEPTED_REGRESSIONS=true
+          fi
           echo "has_regressions=$HAS_REGRESSIONS" >> "$GITHUB_OUTPUT"
+          echo "has_unaccepted_regressions=$HAS_UNACCEPTED_REGRESSIONS" >> "$GITHUB_OUTPUT"
 
       - name: Build report artifact name
         id: report_artifact_name
@@ -522,6 +694,7 @@ jobs:
           path: |
             report*.md
             summary-*.json
+            regression-overrides.json
 
       - name: Upsert IAI-Callgrind PR comment
         if: >-
@@ -595,7 +768,7 @@ jobs:
             });
 
       - name: Fail on regression
-        if: inputs.fail_on_regression && steps.render_overall.outputs.has_regressions == 'true'
+        if: inputs.fail_on_regression && steps.render_overall.outputs.has_unaccepted_regressions == 'true'
         run: |
-          echo "Detected benchmark regressions above threshold."
+          echo "Detected unaccepted benchmark regressions above threshold."
           exit 1

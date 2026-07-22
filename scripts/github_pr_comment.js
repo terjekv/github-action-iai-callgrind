@@ -50,6 +50,64 @@ async function loadHistory({ github, context, core, historyPath, historyKey, mar
   }
 }
 
+async function loadPullRequestMetadata({ github, context, metadataPath, approvalLabel }) {
+  const issueNumber = context.payload?.pull_request?.number;
+  if (!issueNumber) {
+    return;
+  }
+
+  const response = await github.rest.pulls.get({
+    owner: context.repo.owner,
+    repo: context.repo.repo,
+    pull_number: issueNumber,
+  });
+  const pullRequest = response.data || {};
+  const labels = (pullRequest.labels || [])
+    .map((label) => (typeof label === "string" ? label : label && label.name))
+    .filter((label) => typeof label === "string");
+  const editResponse = await github.graphql(
+    `query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) { lastEditedAt }
+      }
+    }`,
+    {
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      number: issueNumber,
+    },
+  );
+  const bodyLastEditedAt =
+    editResponse?.repository?.pullRequest?.lastEditedAt || null;
+  const timeline = await github.paginate(
+    github.rest.issues.listEventsForTimeline,
+    {
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      issue_number: issueNumber,
+      per_page: 100,
+    },
+  );
+  const labelAppliedAt = timeline
+    .filter(
+      (event) =>
+        event?.event === "labeled" && event?.label?.name === approvalLabel,
+    )
+    .map((event) => event.created_at)
+    .filter((createdAt) => typeof createdAt === "string")
+    .sort()
+    .at(-1) || null;
+  fs.writeFileSync(
+    metadataPath,
+    JSON.stringify({
+      body: typeof pullRequest.body === "string" ? pullRequest.body : "",
+      labels,
+      body_last_edited_at: bodyLastEditedAt,
+      approval_label_applied_at: labelAppliedAt,
+    }),
+  );
+}
+
 async function upsertReport({
   github,
   context,
@@ -104,5 +162,6 @@ async function upsertReport({
 
 module.exports = {
   loadHistory,
+  loadPullRequestMetadata,
   upsertReport,
 };

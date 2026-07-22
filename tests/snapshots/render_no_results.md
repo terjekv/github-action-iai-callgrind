@@ -5,9 +5,9 @@ PR: #7 • Latest: 2026-02-27 20:22 UTC • Head: deadbee
 
 ## Summary (Latest Run • deadbee)
 
-| Feature Set | Improved | Regressions | Neutral | Avg Δ (bench) | Avg Δ (metrics) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| n/a | 0 | 0 | 0 | n/a | n/a |
+| Feature Set | Improved | Regressions | Accepted | Neutral | Avg Δ (bench) | Avg Δ (metrics) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| n/a | 0 | 0 | 0 | 0 | n/a | n/a |
 
 
 No benchmark results were found.

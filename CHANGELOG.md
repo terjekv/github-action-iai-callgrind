@@ -7,6 +7,24 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+### Added
+
+- Add opt-in, label-approved PR-body exceptions for intentional benchmark regressions while keeping
+  raw and unaccepted regression signals separate in reports and reusable-workflow outputs.
+- Precompile standard Cargo benchmark targets once per revision and feature set, then distribute
+  their executables to the existing parallel benchmark jobs.
+
+### Security
+
+- Bind regression-exception approval to a label application newer than the latest PR-body edit and
+  record the parsed directive digest, preventing retained labels from approving edited exceptions.
+
+### Fixed
+
+- Preserve Cargo's `--bench` execution semantics and dynamic-library search paths for precompiled
+  benchmarks, keep binary artifacts out of report downloads, and avoid cross-runner execution for
+  `target-cpu=native` builds.
+
 Changelog tracking formally starts with `2.0.0`. Earlier releases, including `v1`, were not backfilled here.
 
 ## [2.1.3] - 2026-07-12

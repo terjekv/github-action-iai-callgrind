@@ -5,10 +5,10 @@ PR: #12 • Latest: 2026-02-27 20:30 UTC • Head: deadbee
 
 ## Summary (Latest Run • deadbee)
 
-| Feature Set | Improved | Regressions | Neutral | Avg Δ (bench) | Avg Δ (metrics) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| alt-impl | 1 | 0 | 0 | -10.00% | -10.00% |
-| default | 0 | 1 | 0 | +10.00% | +10.00% |
+| Feature Set | Improved | Regressions | Accepted | Neutral | Avg Δ (bench) | Avg Δ (metrics) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| alt-impl | 1 | 0 | 0 | 0 | -10.00% | -10.00% |
+| default | 0 | 1 | 0 | 0 | +10.00% | +10.00% |
 
 
 <details><summary><strong>alt-impl</strong></summary>
@@ -49,7 +49,7 @@ Metric-level breakdowns:
 
 </details>
 
-### Regressions Above Threshold
+### Unaccepted Regressions Above Threshold
 
 - `default` / `fast_path`: +10.00%
 
@@ -62,4 +62,4 @@ Metric-level breakdowns:
 | abc1234 | 2026-02-26 19:00 UTC | 1 improved / 0 reg / 0 neutral | -5.00% | -5.00% | no |
 
 
-<!-- iai-callgrind-history: {"history":[{"backend":"iai-callgrind","commit":"deadbeefcafebabe","run_at":"2026-02-27 20:30 UTC","pr_number":12,"summary":{"improved":1,"regressions":1,"neutral":0},"avg_bench_delta_pct":0.0,"avg_metric_delta_pct":0.0,"has_regressions":true},{"backend":"iai-callgrind","commit":"abc1234","run_at":"2026-02-26 19:00 UTC","summary":{"improved":1,"regressions":0,"neutral":0},"avg_bench_delta_pct":-5.0,"avg_metric_delta_pct":-5.0,"has_regressions":false}]} -->
+<!-- iai-callgrind-history: {"history":[{"backend":"iai-callgrind","commit":"deadbeefcafebabe","run_at":"2026-02-27 20:30 UTC","pr_number":12,"summary":{"improved":1,"regressions":1,"accepted_regressions":0,"neutral":0},"avg_bench_delta_pct":0.0,"avg_metric_delta_pct":0.0,"has_regressions":true,"has_unaccepted_regressions":true},{"backend":"iai-callgrind","commit":"abc1234","run_at":"2026-02-26 19:00 UTC","summary":{"improved":1,"regressions":0,"neutral":0},"avg_bench_delta_pct":-5.0,"avg_metric_delta_pct":-5.0,"has_regressions":false}]} -->

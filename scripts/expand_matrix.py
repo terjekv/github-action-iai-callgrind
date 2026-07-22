@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import tomllib
 from typing import Any
 
 BACKENDS = ("iai-callgrind", "criterion")
+NATIVE_TARGET_CPU_RE = re.compile(r"target-cpu\s*=\s*native", re.IGNORECASE)
 
 
 def normalize_backend(raw: str) -> str:
@@ -353,29 +355,47 @@ def make_matrix(
         for feature_set in feature_sets:
             case_seed = f"{backend}|{bench_name}|{feature_set['name']}|{feature_set['features']}"
             case_id = hashlib.sha1(case_seed.encode("utf-8")).hexdigest()[:10]
+            group_seed = (
+                f"{feature_set['name']}|{feature_set['features']}|"
+                f"{feature_set.get('no_default_features', False)}"
+            )
+            build_group_id = hashlib.sha1(group_seed.encode("utf-8")).hexdigest()[:10]
+            command = build_command(bench, feature_set, cargo_args, backend, criterion_cli_args)
+            head_command = build_command(
+                command_spec(bench, "head"),
+                feature_set,
+                cargo_args,
+                backend,
+                criterion_cli_args,
+            )
+            base_command = build_command(
+                command_spec(bench, "base"),
+                feature_set,
+                cargo_args,
+                backend,
+                criterion_cli_args,
+            )
+            head_split = split_benchmark_command(head_command)
+            base_split = split_benchmark_command(base_command)
+            precompile = (
+                head_split is not None
+                and base_split is not None
+                and not uses_native_target_cpu(head_command)
+                and not uses_native_target_cpu(base_command)
+            )
             include.append(
                 {
                     "id": case_id,
                     "backend": backend,
                     "benchmark_name": bench_name,
                     "feature_name": feature_set["name"],
-                    "command": build_command(
-                        bench, feature_set, cargo_args, backend, criterion_cli_args
-                    ),
-                    "head_command": build_command(
-                        command_spec(bench, "head"),
-                        feature_set,
-                        cargo_args,
-                        backend,
-                        criterion_cli_args,
-                    ),
-                    "base_command": build_command(
-                        command_spec(bench, "base"),
-                        feature_set,
-                        cargo_args,
-                        backend,
-                        criterion_cli_args,
-                    ),
+                    "command": command,
+                    "head_command": head_command,
+                    "base_command": base_command,
+                    "precompile": precompile,
+                    "build_group_id": build_group_id,
+                    "head_run_args": head_split[1] if head_split else "",
+                    "base_run_args": base_split[1] if base_split else "",
                     "moved": bool(bench.get("moved")),
                     "move_source": bench.get("move_source"),
                     "move_target": bench.get("move_target"),
@@ -383,6 +403,94 @@ def make_matrix(
                     "move_candidates": bench.get("move_candidates", []),
                 }
             )
+    return {"include": include}
+
+
+def split_benchmark_command(command: str) -> tuple[str, str] | None:
+    """Split a cargo bench command into its compile command and binary arguments."""
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return None
+
+    if len(parts) < 4 or parts[:2] != ["cargo", "bench"]:
+        return None
+    if parts.count("--bench") != 1:
+        return None
+    bench_index = parts.index("--bench")
+    if bench_index + 1 >= len(parts):
+        return None
+
+    separator = parts.index("--") if "--" in parts else len(parts)
+    cargo_parts = parts[:separator]
+    binary_parts = parts[separator + 1 :] if separator < len(parts) else []
+    if "--bench" not in binary_parts:
+        binary_parts.insert(0, "--bench")
+    if "--no-run" not in cargo_parts:
+        cargo_parts.append("--no-run")
+    message_format_index = next(
+        (index for index, part in enumerate(cargo_parts) if part == "--message-format"), None
+    )
+    if message_format_index is not None and message_format_index + 1 < len(cargo_parts):
+        cargo_parts[message_format_index + 1] = "json"
+    else:
+        cargo_parts = [
+            "--message-format=json" if part.startswith("--message-format=") else part
+            for part in cargo_parts
+        ]
+    if not any(
+        part == "--message-format" or part.startswith("--message-format=") for part in cargo_parts
+    ):
+        cargo_parts.extend(["--message-format", "json"])
+
+    return shlex.join(cargo_parts), shlex.join(binary_parts)
+
+
+def uses_native_target_cpu(command: str) -> bool:
+    """Return whether a command requests host-specific machine code."""
+    return NATIVE_TARGET_CPU_RE.search(command) is not None
+
+
+def make_build_matrix(matrix: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    metadata: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in matrix["include"]:
+        if not item["precompile"]:
+            continue
+        for side in ("head", "base"):
+            key = (item["build_group_id"], side)
+            split = split_benchmark_command(item[f"{side}_command"])
+            if split is None:
+                continue
+            groups.setdefault(key, []).append(
+                {
+                    "id": item["id"],
+                    "benchmark_name": item["benchmark_name"],
+                    "compile_command": split[0],
+                }
+            )
+            metadata[key] = {
+                "id": f"{item['build_group_id']}-{side}",
+                "group_id": item["build_group_id"],
+                "side": side,
+                "feature_name": item["feature_name"],
+                "enabled": True,
+            }
+
+    include: list[dict[str, Any]] = []
+    for key, cases in groups.items():
+        include.append({**metadata[key], "cases": cases})
+    if not include:
+        include.append(
+            {
+                "id": "disabled",
+                "group_id": "disabled",
+                "side": "head",
+                "feature_name": "default",
+                "enabled": False,
+                "cases": [],
+            }
+        )
     return {"include": include}
 
 
@@ -418,6 +526,7 @@ def main() -> int:
     parser.add_argument("--base-sha")
     parser.add_argument("--cargo-args", default="")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--build-output")
     parsed_argv = normalize_option_values(
         sys.argv[1:],
         value_options={"--criterion-cli-args", "--cargo-args"},
@@ -465,6 +574,10 @@ def main() -> int:
         args.criterion_cli_args,
     )
     pathlib.Path(args.output).write_text(json.dumps(matrix), encoding="utf-8")
+    if args.build_output:
+        pathlib.Path(args.build_output).write_text(
+            json.dumps(make_build_matrix(matrix)), encoding="utf-8"
+        )
     return 0
 
 
