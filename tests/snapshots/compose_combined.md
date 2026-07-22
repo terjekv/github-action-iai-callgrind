@@ -9,10 +9,10 @@ Regression threshold: **3.00%**
 
 ### Summary (Latest Run • deadbee)
 
-| Feature Set | Improved | Regressions | Neutral | Avg Δ (bench) | Avg Δ (metrics) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| alt-impl | 1 | 0 | 0 | -10.00% | -10.00% |
-| default | 0 | 1 | 0 | +10.00% | +10.00% |
+| Feature Set | Improved | Regressions | Accepted | Neutral | Avg Δ (bench) | Avg Δ (metrics) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| alt-impl | 1 | 0 | 0 | 0 | -10.00% | -10.00% |
+| default | 0 | 1 | 0 | 0 | +10.00% | +10.00% |
 
 
 <details><summary><strong>alt-impl</strong></summary>
@@ -53,7 +53,7 @@ Metric-level breakdowns:
 
 </details>
 
-#### Regressions Above Threshold
+#### Unaccepted Regressions Above Threshold
 
 - `default` / `fast_path`: +10.00%
 
@@ -65,7 +65,7 @@ Metric-level breakdowns:
 | deadbee | 2026-02-27 20:30 UTC | 1 improved / 1 reg / 0 neutral | +0.00% | +0.00% | yes |
 
 
-<!-- iai-callgrind-history: {"history":[{"backend":"iai-callgrind","commit":"deadbeefcafebabe","run_at":"2026-02-27 20:30 UTC","pr_number":12,"summary":{"improved":1,"regressions":1,"neutral":0},"avg_bench_delta_pct":0.0,"avg_metric_delta_pct":0.0,"has_regressions":true}]} -->
+<!-- iai-callgrind-history: {"history":[{"backend":"iai-callgrind","commit":"deadbeefcafebabe","run_at":"2026-02-27 20:30 UTC","pr_number":12,"summary":{"improved":1,"regressions":1,"accepted_regressions":0,"neutral":0},"avg_bench_delta_pct":0.0,"avg_metric_delta_pct":0.0,"has_regressions":true,"has_unaccepted_regressions":true}]} -->
 
 ## Criterion
 
@@ -74,9 +74,9 @@ Comparison statistic: **median** (ns)
 
 ### Summary (Latest Run • deadbee)
 
-| Feature Set | Improved | Regressions | Neutral | Avg Δ (bench) | Avg Δ (metrics) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| default | 1 | 0 | 1 | -2.50% | -2.50% |
+| Feature Set | Improved | Regressions | Accepted | Neutral | Avg Δ (bench) | Avg Δ (metrics) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default | 1 | 0 | 0 | 1 | -2.50% | -2.50% |
 
 
 <details><summary><strong>default</strong></summary>
@@ -115,4 +115,4 @@ Metric-level breakdowns:
 | deadbee | 2026-02-27 20:30 UTC | 1 improved / 0 reg / 1 neutral | -2.50% | -2.50% | no |
 
 
-<!-- criterion-history: {"history":[{"backend":"criterion","commit":"deadbeefcafebabe","run_at":"2026-02-27 20:30 UTC","pr_number":12,"summary":{"improved":1,"regressions":0,"neutral":1},"avg_bench_delta_pct":-2.5,"avg_metric_delta_pct":-2.5,"has_regressions":false}]} -->
+<!-- criterion-history: {"history":[{"backend":"criterion","commit":"deadbeefcafebabe","run_at":"2026-02-27 20:30 UTC","pr_number":12,"summary":{"improved":1,"regressions":0,"accepted_regressions":0,"neutral":1},"avg_bench_delta_pct":-2.5,"avg_metric_delta_pct":-2.5,"has_regressions":false,"has_unaccepted_regressions":false}]} -->

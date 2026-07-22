@@ -92,15 +92,29 @@ on:
         type: number
         default: -1
       fail_on_regression:
-        description: Fail workflow if any case regresses above threshold.
+        description: Fail workflow if any unaccepted case regresses above threshold.
         required: false
         type: boolean
         default: false
+      regression_override_label:
+        description: >-
+          Exact PR label required to activate PR-body regression exceptions. Empty disables
+          regression exceptions.
+        required: false
+        type: string
+        default: ""
       comment_mode:
         description: PR comment behavior (always, on-regression, never).
         required: false
         type: string
         default: always
+    outputs:
+      has_regressions:
+        description: Whether the latest run measured any regressions above threshold.
+        value: ${{ jobs.rust-pr-bench.outputs.has_regressions }}
+      has_unaccepted_regressions:
+        description: Whether the latest run has regressions not covered by an approved exception.
+        value: ${{ jobs.rust-pr-bench.outputs.has_unaccepted_regressions }}
 
 permissions:
   contents: read
@@ -127,5 +141,6 @@ jobs:
       regression_threshold_pct_iai_callgrind: ${{ inputs.regression_threshold_pct_iai_callgrind }}
       regression_threshold_pct_criterion: ${{ inputs.regression_threshold_pct_criterion }}
       fail_on_regression: ${{ inputs.fail_on_regression }}
+      regression_override_label: ${{ inputs.regression_override_label }}
       comment_mode: ${{ inputs.comment_mode }}
     secrets: inherit

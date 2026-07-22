@@ -8,7 +8,7 @@ Reusable GitHub workflow for benchmarking Rust PRs with `iai-callgrind`, `criter
 - Supports `iai-callgrind`, `criterion`, or `all` via the `backend` input.
 - Compares `head` (`github.sha`) against PR base (`pull_request.base.sha`) in the same matrix job.
 - Publishes a sticky PR comment with grouped markdown tables and per-benchmark metric breakdowns.
-- Optionally fails CI when regressions exceed a threshold.
+- Optionally fails CI when unaccepted regressions exceed a threshold.
 
 ## Reusable workflow
 
@@ -172,11 +172,109 @@ jobs:
   - Optional backend-specific threshold override for `criterion`.
   - `-1` means "use `regression_threshold_pct`".
 - `fail_on_regression` (boolean, default `false`)
+  - Fails when at least one regression exceeds its configured threshold and is not covered by an
+    approved PR-body exception.
+- `regression_override_label` (string, default empty)
+  - Exact PR label required to activate PR-body regression exceptions.
+  - Empty disables exception parsing and preserves the normal threshold gate.
 - `comment_mode` (`always` | `on-regression` | `never`, default `always`)
 - `action_repository` (string, default `terjekv/github-action-iai-callgrind`)
   - Repository containing this reusable workflow and its scripts.
 - `action_ref` (string, default empty)
   - Ref (sha/tag/branch) for `action_repository`. Required when `action_repository` is not the default.
+
+### Outputs
+
+- `has_regressions`: `true` when the run measured any benchmark regression above its threshold,
+  including accepted regressions.
+- `has_unaccepted_regressions`: `true` when at least one measured regression is not covered by an
+  approved exception. This is the value used by `fail_on_regression`.
+
+## Accepting intentional regressions
+
+Some changes, such as constant-time implementations or other security hardening, have a necessary
+performance cost. Consumers can opt into reviewable, one-PR exceptions without hiding the measured
+regression.
+
+First, configure the exact approval label in the caller workflow and create that label in the caller
+repository. The action does not create or apply labels.
+
+```yaml
+jobs:
+  bench:
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2
+    with:
+      backend: all
+      fail_on_regression: true
+      regression_override_label: performance-regression-approved
+```
+
+Then add exactly one `rust-pr-bench` fenced JSON block to the PR body:
+
+````markdown
+```rust-pr-bench
+{
+  "accept_regressions": [
+    {
+      "benchmark": "verify_password",
+      "backend": "iai-callgrind",
+      "feature": "default",
+      "max_regression_pct": 35,
+      "reason": "Constant-time verification required by the security fix"
+    },
+    {
+      "benchmark": "tls_handshake",
+      "max_regression_pct": "any",
+      "reason": "Required protocol hardening"
+    }
+  ]
+}
+```
+````
+
+Each rule has these fields:
+
+- `benchmark` (required): exact, case-sensitive benchmark display name.
+- `max_regression_pct` (required): a finite non-negative percentage, or the string `"any"`.
+  A number is the maximum total head-over-base delta, not extra tolerance. For example, `35`
+  accepts up to `+35%`.
+- `reason` (required): non-empty audit explanation shown in the report.
+- `backend` (optional): exact `iai-callgrind` or `criterion`; omission applies to both backends.
+- `feature` (optional): exact feature-set name; omission applies to all feature sets.
+
+Exceptions apply to the benchmark-level delta used by the gate. Metric-breakdown rows remain
+informational and keep their normal threshold classifications.
+
+Rules use exact matching and do not support globs. Rules for the same benchmark must not overlap:
+use disjoint backend or feature scopes when different limits are needed. Malformed JSON, unknown
+fields, invalid limits, multiple directive blocks, or overlapping rules fail the report job rather
+than silently weakening the gate.
+
+The PR body declares the exception, but it has no effect until a maintainer applies the configured
+label. The label application must be later than the PR body's most recent edit. Any subsequent body
+edit invalidates that approval even if GitHub retains the label; remove and reapply the label after
+reviewing the final directive. The report configuration records a SHA-256 digest of the parsed rules
+so the approved directive can be audited independently of unrelated PR-body formatting.
+
+An approved result within its limit is displayed as an accepted regression and remains part of
+`has_regressions`; it is excluded only from `has_unaccepted_regressions`. Missing or stale approval
+labels and exceeded limits leave the regression actionable. Approved rules that match no
+above-threshold result are listed as unused so spelling or scope mistakes are visible.
+
+The report job fetches the current PR body, its last-edit timestamp, and the configured label's most
+recent application event. After adding or editing the block, apply or reapply the label, then use
+**Re-run failed jobs** on the existing workflow run to reevaluate the report without intentionally
+rerunning successful benchmark jobs. To run automatically on PR metadata changes, the caller may
+opt into additional event types:
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+```
+
+Those additional event types start a new workflow run, including its benchmark jobs. Include
+`unlabeled` if removing approval must automatically invalidate the result for the same commit.
 
 ## Benchmark location
 
@@ -255,6 +353,16 @@ benchmarks_json: >-
   - `criterion`: selected estimate statistic (`mean` or `median`, unit `ns`)
 - With `backend: all`, the workflow posts a single consolidated PR comment with one section per backend.
 - The workflow installs `valgrind` and `iai-callgrind-runner` only for `iai-callgrind`.
+- Standard `cargo bench --bench <target>` commands are precompiled once per revision and feature
+  set. The resulting benchmark executables are distributed to the per-benchmark jobs, preserving
+  parallel benchmark execution without rebuilding shared application dependencies for every case.
+  Direct execution preserves Cargo's implicit `--bench` argument and dynamic-library search paths.
+  Application binaries referenced by IAI binary benchmarks are bundled with their harnesses.
+- Precompilation is disabled when a benchmark command, Rust flag, or Cargo configuration uses
+  `target-cpu=native`. Those benchmarks build and run on the same runner so native instructions are
+  never transferred to a potentially incompatible CPU.
+- Full custom commands that cannot be separated into compilation and execution keep the original
+  per-benchmark build behavior.
 - Markdown layout is template-driven for easier iteration:
   - `scripts/templates/report_single.md.tmpl`
   - `scripts/templates/report_single_summary.md.tmpl`

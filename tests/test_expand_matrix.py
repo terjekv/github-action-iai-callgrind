@@ -114,6 +114,83 @@ class ExpandMatrixTests(unittest.TestCase):
             "cargo bench --bench bench_a --release -- --noplot --sample-size 10",
         )
 
+    def test_split_benchmark_command_separates_compile_and_runtime_args(self) -> None:
+        split = expand_matrix.split_benchmark_command(
+            "cargo bench --bench bench_a --release -- --noplot --sample-size 10"
+        )
+
+        self.assertEqual(
+            split,
+            (
+                "cargo bench --bench bench_a --release --no-run --message-format json",
+                "--bench --noplot --sample-size 10",
+            ),
+        )
+
+    def test_split_benchmark_command_adds_cargos_implicit_bench_argument(self) -> None:
+        self.assertEqual(
+            expand_matrix.split_benchmark_command("cargo bench --bench bench_a"),
+            (
+                "cargo bench --bench bench_a --no-run --message-format json",
+                "--bench",
+            ),
+        )
+
+    def test_native_target_cpu_disables_cross_runner_precompilation(self) -> None:
+        feature_sets = [{"name": "default", "features": "", "no_default_features": False}]
+        benchmarks = [{"name": "native", "bench": "native", "backend": "criterion"}]
+
+        matrix = expand_matrix.make_matrix(
+            benchmarks,
+            feature_sets,
+            "--config 'build.rustflags=[\"-C\",\"target-cpu=native\"]'",
+            "--noplot",
+        )
+        build_matrix = expand_matrix.make_build_matrix(matrix)
+
+        self.assertFalse(matrix["include"][0]["precompile"])
+        self.assertFalse(build_matrix["include"][0]["enabled"])
+
+    def test_split_benchmark_command_rejects_opaque_custom_command(self) -> None:
+        self.assertIsNone(expand_matrix.split_benchmark_command("./scripts/run-benchmark bench_a"))
+
+    def test_build_matrix_groups_benchmarks_by_feature_and_revision(self) -> None:
+        feature_sets = [{"name": "default", "features": "", "no_default_features": False}]
+        benchmarks = [
+            {"name": "bench_a", "bench": "bench_a", "backend": "iai-callgrind"},
+            {"name": "bench_b", "bench": "bench_b", "backend": "iai-callgrind"},
+        ]
+
+        benchmark_matrix = expand_matrix.make_matrix(benchmarks, feature_sets, "", "--noplot")
+        build_matrix = expand_matrix.make_build_matrix(benchmark_matrix)
+
+        self.assertTrue(all(item["precompile"] for item in benchmark_matrix["include"]))
+        self.assertEqual({item["side"] for item in build_matrix["include"]}, {"head", "base"})
+        self.assertEqual([len(item["cases"]) for item in build_matrix["include"]], [2, 2])
+
+    def test_custom_command_uses_disabled_precompile_matrix(self) -> None:
+        feature_sets = [{"name": "default", "features": "", "no_default_features": False}]
+        benchmarks = [{"name": "custom", "command": "./bench.sh", "backend": "criterion"}]
+
+        benchmark_matrix = expand_matrix.make_matrix(benchmarks, feature_sets, "", "--noplot")
+        build_matrix = expand_matrix.make_build_matrix(benchmark_matrix)
+
+        self.assertFalse(benchmark_matrix["include"][0]["precompile"])
+        self.assertFalse(build_matrix["include"][0]["enabled"])
+
+    def test_build_matrix_shares_application_build_across_backends(self) -> None:
+        feature_sets = [{"name": "default", "features": "", "no_default_features": False}]
+        benchmarks = [
+            {"name": "callgrind", "bench": "callgrind", "backend": "iai-callgrind"},
+            {"name": "criterion", "bench": "criterion", "backend": "criterion"},
+        ]
+
+        benchmark_matrix = expand_matrix.make_matrix(benchmarks, feature_sets, "", "--noplot")
+        build_matrix = expand_matrix.make_build_matrix(benchmark_matrix)
+
+        self.assertEqual(len(build_matrix["include"]), 2)
+        self.assertEqual([len(item["cases"]) for item in build_matrix["include"]], [2, 2])
+
     def test_pair_moved_benchmarks_adds_base_spec_for_unique_move(self) -> None:
         head = [
             {

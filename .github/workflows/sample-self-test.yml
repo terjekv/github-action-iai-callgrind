@@ -34,7 +34,7 @@ jobs:
 
       - name: Run Python script tests
         run: |
-          python3 -m py_compile scripts/expand_matrix.py scripts/render_report.py scripts/compose_combined_report.py scripts/run_pair.py
+          python3 -m py_compile scripts/expand_matrix.py scripts/precompile_benchmarks.py scripts/regression_overrides.py scripts/render_report.py scripts/compose_combined_report.py scripts/run_pair.py
           python3 -m unittest discover -s tests -v
 
       - name: Run JS helper tests
@@ -58,6 +58,8 @@ jobs:
     needs: clippy-sample
     uses: ./.github/workflows/rust-pr-bench.yml
     with:
+      action_repository: ${{ github.event.pull_request.head.repo.full_name }}
+      action_ref: ${{ github.event.pull_request.head.sha }}
       backend: iai-callgrind
       working_directory: examples/sample-rust-app
       benchmarks_json: >-
@@ -73,6 +75,8 @@ jobs:
     needs: clippy-sample
     uses: ./.github/workflows/rust-pr-bench.yml
     with:
+      action_repository: ${{ github.event.pull_request.head.repo.full_name }}
+      action_ref: ${{ github.event.pull_request.head.sha }}
       backend: criterion
       working_directory: examples/sample-rust-app
       benchmarks_json: >-
@@ -90,6 +94,8 @@ jobs:
     needs: clippy-sample
     uses: ./.github/workflows/rust-pr-bench.yml
     with:
+      action_repository: ${{ github.event.pull_request.head.repo.full_name }}
+      action_ref: ${{ github.event.pull_request.head.sha }}
       backend: all
       working_directory: examples/sample-rust-app
       benchmarks_json: >-
@@ -109,19 +115,41 @@ jobs:
     needs: clippy-sample
     uses: ./.github/workflows/rust-pr-bench.yml
     with:
+      action_repository: ${{ github.event.pull_request.head.repo.full_name }}
+      action_ref: ${{ github.event.pull_request.head.sha }}
       backend: iai-callgrind
       working_directory: examples/sample-rust-app
       auto_discover: true
       benchmarks_json: "[]"
       feature_sets_json: '[{"name":"default","features":""}]'
       regression_threshold_pct_iai_callgrind: 2
-      fail_on_regression: false
+      regression_override_label: rust-pr-bench-self-test-approval
+      fail_on_regression: true
       comment_mode: never
+
+  check-regression-outputs:
+    needs: bench-sample-autodiscover-callgrind
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate reusable workflow regression outputs
+        env:
+          HAS_REGRESSIONS: ${{ needs.bench-sample-autodiscover-callgrind.outputs.has_regressions }}
+          HAS_UNACCEPTED_REGRESSIONS: ${{ needs.bench-sample-autodiscover-callgrind.outputs.has_unaccepted_regressions }}
+        run: |
+          case "$HAS_REGRESSIONS/$HAS_UNACCEPTED_REGRESSIONS" in
+            false/false|true/true|true/false) ;;
+            *)
+              echo "Unexpected regression outputs: $HAS_REGRESSIONS/$HAS_UNACCEPTED_REGRESSIONS" >&2
+              exit 1
+              ;;
+          esac
 
   bench-sample-autodiscover-criterion:
     needs: clippy-sample
     uses: ./.github/workflows/rust-pr-bench.yml
     with:
+      action_repository: ${{ github.event.pull_request.head.repo.full_name }}
+      action_ref: ${{ github.event.pull_request.head.sha }}
       backend: criterion
       working_directory: examples/sample-rust-app
       auto_discover: true

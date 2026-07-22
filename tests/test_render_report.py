@@ -1,9 +1,8 @@
-import json
 import pathlib
 import tempfile
 import unittest
 
-from testlib import REPO_ROOT, load_script_module, read_snapshot
+from testlib import load_script_module, read_snapshot
 
 
 render_report = load_script_module("render_report", "scripts/render_report.py")
@@ -278,9 +277,94 @@ class RenderReportTests(unittest.TestCase):
         )
 
         latest = summary["latest"]
-        self.assertEqual(latest["summary"], {"improved": 0, "regressions": 1, "neutral": 0})
+        self.assertEqual(
+            latest["summary"],
+            {"improved": 0, "regressions": 1, "accepted_regressions": 0, "neutral": 0},
+        )
         self.assertEqual(latest["avg_bench_delta_pct"], 10.0)
         self.assertEqual(latest["avg_metric_delta_pct"], 10.0)
+
+    def test_approved_regression_is_visible_but_not_actionable(self) -> None:
+        overrides = {
+            "enabled": True,
+            "approved": True,
+            "approval_label": "performance-approved",
+            "rules": [
+                {
+                    "benchmark": "fast_path",
+                    "backend": "iai-callgrind",
+                    "feature": "default",
+                    "max_regression_pct": 15.0,
+                    "reason": "Constant-time security fix",
+                }
+            ],
+        }
+
+        markdown, summary = render_report.render_markdown(
+            callgrind_results(), 3.0, "iai-callgrind", None, "head", None, [], 10,
+            "iai-callgrind-history", None, None, None, False, overrides,
+        )
+
+        self.assertTrue(summary["has_regressions"])
+        self.assertFalse(summary["has_unaccepted_regressions"])
+        self.assertEqual(summary["accepted_regressions"], 1)
+        self.assertEqual(summary["latest"]["summary"]["accepted_regressions"], 1)
+        self.assertIn("🟠 accepted regression", markdown)
+        self.assertIn("### Accepted Regressions", markdown)
+        self.assertIn("Constant-time security fix", markdown)
+        self.assertNotIn("### Unaccepted Regressions", markdown)
+
+    def test_approved_rule_over_its_limit_remains_actionable(self) -> None:
+        overrides = {
+            "enabled": True,
+            "approved": True,
+            "approval_label": "performance-approved",
+            "rules": [
+                {
+                    "benchmark": "fast_path",
+                    "max_regression_pct": 5.0,
+                    "reason": "Expected small security cost",
+                }
+            ],
+        }
+
+        markdown, summary = render_report.render_markdown(
+            callgrind_results(), 3.0, "iai-callgrind", None, None, None, [], 10,
+            "iai-callgrind-history", None, None, None, False, overrides,
+        )
+
+        self.assertTrue(summary["has_regressions"])
+        self.assertTrue(summary["has_unaccepted_regressions"])
+        self.assertEqual(summary["accepted_regressions"], 0)
+        self.assertIn("requested limit +5.00% exceeded", markdown)
+
+    def test_unapproved_and_unused_rules_are_reported(self) -> None:
+        rule = {
+            "benchmark": "does_not_exist",
+            "max_regression_pct": "any",
+            "reason": "Future security work\nwith context",
+        }
+        unapproved = {
+            "enabled": True,
+            "approved": False,
+            "approval_label": "performance-approved",
+            "rules": [rule],
+        }
+        approved = {**unapproved, "approved": True}
+
+        unapproved_markdown, unapproved_summary = render_report.render_markdown(
+            callgrind_results(), 3.0, "iai-callgrind", None, None, None, [], 10,
+            "iai-callgrind-history", None, None, None, False, unapproved,
+        )
+        approved_markdown, _ = render_report.render_markdown(
+            callgrind_results(), 3.0, "iai-callgrind", None, None, None, [], 10,
+            "iai-callgrind-history", None, None, None, False, approved,
+        )
+
+        self.assertTrue(unapproved_summary["has_unaccepted_regressions"])
+        self.assertIn("Awaiting Approval", unapproved_markdown)
+        self.assertIn("Future security work with context", unapproved_markdown)
+        self.assertIn("Unused Approved Regression Exceptions", approved_markdown)
 
     def test_summary_and_history_templates_can_be_overridden(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

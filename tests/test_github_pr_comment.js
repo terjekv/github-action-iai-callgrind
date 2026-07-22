@@ -6,19 +6,42 @@ const assert = require("node:assert/strict");
 
 const helper = require("../scripts/github_pr_comment");
 
-function makeGithub(comments) {
+function makeGithub(
+  comments,
+  pullRequest = { body: "", labels: [] },
+  timeline = [],
+  lastEditedAt = null,
+) {
   const state = {
     comments,
+    pullRequest,
+    timeline,
+    lastEditedAt,
+    graphqlQueries: [],
+    pullRequests: [],
     updates: [],
     creates: [],
     deletes: [],
   };
 
-  return {
+  const github = {
     state,
-    paginate: async () => state.comments,
+    graphql: async (query, variables) => {
+      state.graphqlQueries.push({ query, variables });
+      return {
+        repository: { pullRequest: { lastEditedAt: state.lastEditedAt } },
+      };
+    },
     rest: {
+      pulls: {
+        get: async (payload) => {
+          state.pullRequests.push(payload);
+          return { data: state.pullRequest };
+        },
+      },
       issues: {
+        listComments: async () => {},
+        listEventsForTimeline: async () => {},
         updateComment: async (payload) => {
           state.updates.push(payload);
         },
@@ -31,6 +54,11 @@ function makeGithub(comments) {
       },
     },
   };
+  github.paginate = async (endpoint) =>
+    endpoint === github.rest.issues.listEventsForTimeline
+      ? state.timeline
+      : state.comments;
+  return github;
 }
 
 function makeContext() {
@@ -82,6 +110,70 @@ test("loadHistory ignores malformed history payloads", async () => {
   });
 
   assert.equal(fs.existsSync(historyPath), false);
+});
+
+test("loadPullRequestMetadata fetches the current body and label names", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-pr-metadata-"));
+  const metadataPath = path.join(tempDir, "pr.json");
+  const github = makeGithub([], {
+    body: "PR body from the API",
+    labels: [{ name: "performance-approved" }, "backport"],
+  }, [
+    {
+      event: "labeled",
+      label: { name: "performance-approved" },
+      created_at: "2026-07-22T09:55:00Z",
+    },
+    {
+      event: "labeled",
+      label: { name: "different-label" },
+      created_at: "2026-07-22T10:10:00Z",
+    },
+    {
+      event: "labeled",
+      label: { name: "performance-approved" },
+      created_at: "2026-07-22T10:05:00Z",
+    },
+  ], "2026-07-22T10:00:00Z");
+
+  await helper.loadPullRequestMetadata({
+    github,
+    context: makeContext(),
+    metadataPath,
+    approvalLabel: "performance-approved",
+  });
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(metadataPath, "utf8")), {
+    body: "PR body from the API",
+    labels: ["performance-approved", "backport"],
+    body_last_edited_at: "2026-07-22T10:00:00Z",
+    approval_label_applied_at: "2026-07-22T10:05:00Z",
+  });
+  assert.deepEqual(github.state.pullRequests, [
+    { owner: "octo", repo: "bench", pull_number: 3 },
+  ]);
+  assert.equal(github.state.graphqlQueries.length, 1);
+  assert.deepEqual(github.state.graphqlQueries[0].variables, {
+    owner: "octo",
+    repo: "bench",
+    number: 3,
+  });
+});
+
+test("loadPullRequestMetadata is a no-op outside pull request context", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-pr-metadata-"));
+  const metadataPath = path.join(tempDir, "pr.json");
+  const github = makeGithub([]);
+
+  await helper.loadPullRequestMetadata({
+    github,
+    context: { repo: { owner: "octo", repo: "bench" }, payload: {} },
+    metadataPath,
+    approvalLabel: "performance-approved",
+  });
+
+  assert.equal(fs.existsSync(metadataPath), false);
+  assert.equal(github.state.pullRequests.length, 0);
 });
 
 test("upsertReport updates an existing matching comment", async () => {

@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 import argparse
+import html
 import json
 import math
 import pathlib
+import sys
 from collections import defaultdict
 from string import Template
 from typing import Any, Iterable
 
-TEMPLATE_DIR = pathlib.Path(__file__).resolve().parent / "templates"
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+TEMPLATE_DIR = SCRIPT_DIR / "templates"
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from regression_overrides import (  # noqa: E402
+    matching_rule,
+    rule_accepts_delta,
+    rule_matches_result,
+)
 
 
 def load_results(artifacts_dir: pathlib.Path) -> list[dict[str, Any]]:
@@ -107,13 +118,45 @@ def collect_metric_deltas(entry: dict[str, Any]) -> list[float]:
     return deltas
 
 
+def accepted_override(
+    entry: dict[str, Any],
+    threshold: float,
+    backend: str,
+    override_config: dict[str, Any],
+) -> dict[str, Any] | None:
+    if (
+        entry.get("head_error")
+        or entry.get("base_error")
+        or entry.get("head_missing")
+        or entry.get("base_missing")
+    ):
+        return None
+    _, is_regression = classify(float(entry["delta_pct"]), threshold)
+    if not is_regression:
+        return None
+    rule = matching_rule(
+        override_config,
+        backend,
+        str(entry["feature_name"]),
+        str(entry["benchmark_name"]),
+    )
+    if rule is None or not rule_accepts_delta(rule, float(entry["delta_pct"])):
+        return None
+    return rule
+
+
 def compute_feature_summary(
-    entries: list[dict[str, Any]], threshold: float
-) -> tuple[int, int, int, float | None, float | None, bool]:
+    entries: list[dict[str, Any]],
+    threshold: float,
+    backend: str,
+    override_config: dict[str, Any],
+) -> tuple[int, int, int, int, float | None, float | None, bool, bool]:
     improved = 0
     regressions = 0
+    accepted_regressions = 0
     neutral = 0
     has_regressions = False
+    has_unaccepted_regressions = False
     bench_deltas: list[float] = []
     metric_deltas: list[float] = []
 
@@ -129,6 +172,10 @@ def compute_feature_summary(
         if is_regression:
             regressions += 1
             has_regressions = True
+            if accepted_override(entry, threshold, backend, override_config) is not None:
+                accepted_regressions += 1
+            else:
+                has_unaccepted_regressions = True
         elif status.startswith("🟢"):
             improved += 1
         else:
@@ -137,10 +184,37 @@ def compute_feature_summary(
     return (
         improved,
         regressions,
+        accepted_regressions,
         neutral,
         avg(bench_deltas),
         avg(metric_deltas),
         has_regressions,
+        has_unaccepted_regressions,
+    )
+
+
+def inline_text(value: Any) -> str:
+    return html.escape(" ".join(str(value).split()))
+
+
+def code_text(value: Any) -> str:
+    return f"<code>{inline_text(value)}</code>"
+
+
+def override_limit_text(rule: dict[str, Any]) -> str:
+    maximum = rule["max_regression_pct"]
+    if maximum == "any":
+        return "any finite regression"
+    return f"+{float(maximum):.2f}%"
+
+
+def override_scope_text(rule: dict[str, Any]) -> str:
+    backend = rule.get("backend") or "all backends"
+    feature = rule.get("feature") or "all feature sets"
+    return "{backend} / {feature} / {benchmark}".format(
+        backend=code_text(backend),
+        feature=code_text(feature),
+        benchmark=code_text(rule["benchmark"]),
     )
 
 
@@ -258,16 +332,25 @@ def render_markdown(
     summary_template_path: str | None,
     history_template_path: str | None,
     omit_run_meta: bool,
+    override_config: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     backend = normalize_backend(backend)
+    override_config = override_config or {
+        "enabled": False,
+        "approved": False,
+        "approval_label": "",
+        "rules": [],
+    }
     comparison_statistic = "summary"
     metric_unit = ""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     has_regressions = False
+    has_unaccepted_regressions = False
     summary_rows: list[str] = []
     feature_sections: list[str] = []
     total_improved = 0
     total_regressions = 0
+    total_accepted_regressions = 0
     total_neutral = 0
     all_bench_deltas: list[float] = []
     all_metric_deltas: list[float] = []
@@ -284,15 +367,22 @@ def render_markdown(
             (
                 improved,
                 regressions,
+                accepted_regressions,
                 neutral,
                 avg_bench_delta,
                 avg_metric_delta,
                 feature_has_regressions,
-            ) = compute_feature_summary(grouped[feature_name], threshold)
+                feature_has_unaccepted_regressions,
+            ) = compute_feature_summary(
+                grouped[feature_name], threshold, backend, override_config
+            )
             if feature_has_regressions:
                 has_regressions = True
+            if feature_has_unaccepted_regressions:
+                has_unaccepted_regressions = True
             total_improved += improved
             total_regressions += regressions
+            total_accepted_regressions += accepted_regressions
             total_neutral += neutral
             for entry in grouped[feature_name]:
                 if (
@@ -319,6 +409,8 @@ def render_markdown(
                     status = "⚪ missing"
                 else:
                     status, _ = classify(entry["delta_pct"], threshold)
+                    if accepted_override(entry, threshold, backend, override_config) is not None:
+                        status = "🟠 accepted regression"
                 section_lines.append(
                     "| {bench} | {base} | {head} | {delta} | {status} |".format(
                         bench=entry["benchmark_name"],
@@ -340,10 +432,11 @@ def render_markdown(
             section_lines.append("</details>")
 
             summary_rows.append(
-                "| {feature} | {improved} | {regressions} | {neutral} | {bench_avg} | {metric_avg} |".format(
+                "| {feature} | {improved} | {regressions} | {accepted} | {neutral} | {bench_avg} | {metric_avg} |".format(
                     feature=feature_name,
                     improved=improved,
                     regressions=regressions,
+                    accepted=accepted_regressions,
                     neutral=neutral,
                     bench_avg=fmt_pct_or_na(avg_bench_delta),
                     metric_avg=fmt_pct_or_na(avg_metric_delta),
@@ -352,24 +445,120 @@ def render_markdown(
             feature_sections.append("\n".join(section_lines))
 
     regressions_block = ""
+    accepted_lines: list[str] = []
+    unaccepted_lines: list[str] = []
     if has_regressions:
-        regression_lines: list[str] = []
         for entry in sorted(results, key=lambda e: e["delta_pct"], reverse=True):
             if entry.get("head_error") or entry.get("base_error"):
                 continue
             _, is_regression = classify(entry["delta_pct"], threshold)
             if not is_regression:
                 continue
-            regression_lines.append(
-                "- `{feature}` / `{bench}`: {delta}".format(
-                    feature=entry["feature_name"],
-                    bench=entry["benchmark_name"],
-                    delta=fmt_pct(float(entry["delta_pct"])),
-                )
+            rule = matching_rule(
+                override_config,
+                backend,
+                str(entry["feature_name"]),
+                str(entry["benchmark_name"]),
             )
-        if regression_lines:
-            regressions_block = (
-                "### Regressions Above Threshold\n\n" + "\n".join(regression_lines) + "\n\n"
+            accepted = rule is not None and rule_accepts_delta(
+                rule, float(entry["delta_pct"])
+            )
+            line = "- `{feature}` / `{bench}`: {delta}".format(
+                feature=entry["feature_name"],
+                bench=entry["benchmark_name"],
+                delta=fmt_pct(float(entry["delta_pct"])),
+            )
+            if accepted and rule is not None:
+                accepted_lines.append(
+                    "{line} (limit: {limit}; reason: {reason})".format(
+                        line=line,
+                        limit=override_limit_text(rule),
+                        reason=inline_text(rule["reason"]),
+                    )
+                )
+            else:
+                if rule is not None:
+                    line += " (requested limit {limit} exceeded; reason: {reason})".format(
+                        limit=override_limit_text(rule),
+                        reason=inline_text(rule["reason"]),
+                    )
+                unaccepted_lines.append(line)
+        if unaccepted_lines:
+            regressions_block += (
+                "### Unaccepted Regressions Above Threshold\n\n"
+                + "\n".join(unaccepted_lines)
+                + "\n\n"
+            )
+        if accepted_lines:
+            regressions_block += (
+                "### Accepted Regressions\n\n"
+                + "Approved by label {label}.\n\n".format(
+                    label=code_text(override_config.get("approval_label") or "")
+                )
+                + "\n".join(accepted_lines)
+                + "\n\n"
+            )
+
+    overrides_block = ""
+    applicable_rules = [
+        rule
+        for rule in override_config.get("rules", [])
+        if rule.get("backend") in {None, backend}
+    ]
+    if applicable_rules and not override_config.get("approved"):
+        request_lines = [
+            "- {scope}: limit {limit}; reason: {reason}".format(
+                scope=override_scope_text(rule),
+                limit=override_limit_text(rule),
+                reason=inline_text(rule["reason"]),
+            )
+            for rule in applicable_rules
+        ]
+        overrides_block = (
+            "### Regression Exception Requests (Awaiting Approval)\n\n"
+            + "These requests do not affect the gate until label {label} is present.\n\n".format(
+                label=code_text(override_config.get("approval_label") or "")
+            )
+            + "\n".join(request_lines)
+            + "\n\n"
+        )
+    elif applicable_rules and override_config.get("approved"):
+        matched_rule_ids: set[int] = set()
+        for entry in results:
+            if (
+                entry.get("head_error")
+                or entry.get("base_error")
+                or entry.get("head_missing")
+                or entry.get("base_missing")
+            ):
+                continue
+            _, is_regression = classify(float(entry["delta_pct"]), threshold)
+            if not is_regression:
+                continue
+            for rule in applicable_rules:
+                if rule_matches_result(
+                    rule,
+                    backend,
+                    str(entry["feature_name"]),
+                    str(entry["benchmark_name"]),
+                ):
+                    matched_rule_ids.add(id(rule))
+        unused_rules = [
+            rule for rule in applicable_rules if id(rule) not in matched_rule_ids
+        ]
+        if unused_rules:
+            unused_lines = [
+                "- {scope}: limit {limit}; reason: {reason}".format(
+                    scope=override_scope_text(rule),
+                    limit=override_limit_text(rule),
+                    reason=inline_text(rule["reason"]),
+                )
+                for rule in unused_rules
+            ]
+            overrides_block = (
+                "### Unused Approved Regression Exceptions\n\n"
+                + "\n".join(unused_lines)
+                + "\n\n"
             )
 
     moved_entries = [entry for entry in results if entry.get("moved") or entry.get("move_ambiguous")]
@@ -448,11 +637,13 @@ def render_markdown(
         "summary": {
             "improved": total_improved,
             "regressions": total_regressions,
+            "accepted_regressions": total_accepted_regressions,
             "neutral": total_neutral,
         },
         "avg_bench_delta_pct": avg_bench_delta_all,
         "avg_metric_delta_pct": avg_metric_delta_all,
         "has_regressions": has_regressions,
+        "has_unaccepted_regressions": has_unaccepted_regressions,
     }
 
     def history_entry_key(item: dict[str, Any]) -> str:
@@ -480,9 +671,13 @@ def render_markdown(
     history_rows: list[str] = []
     for item in new_history:
         summary = item.get("summary", {})
-        summary_text = "{improved} improved / {regressions} reg / {neutral} neutral".format(
+        accepted_count = summary.get("accepted_regressions", 0)
+        regression_text = f"{summary.get('regressions', 0)} reg"
+        if accepted_count:
+            regression_text += f" ({accepted_count} accepted)"
+        summary_text = "{improved} improved / {regressions} / {neutral} neutral".format(
             improved=summary.get("improved", 0),
-            regressions=summary.get("regressions", 0),
+            regressions=regression_text,
             neutral=summary.get("neutral", 0),
         )
         history_rows.append(
@@ -508,7 +703,9 @@ def render_markdown(
 
     run_meta_block = "" if omit_run_meta else build_run_meta_block(pr_number, run_at, head_sha)
 
-    summary_rows_text = "\n".join(summary_rows) if summary_rows else "| n/a | 0 | 0 | 0 | n/a | n/a |"
+    summary_rows_text = (
+        "\n".join(summary_rows) if summary_rows else "| n/a | 0 | 0 | 0 | 0 | n/a | n/a |"
+    )
     feature_sections_text = "\n\n".join(feature_sections).strip()
     if not feature_sections_text:
         feature_sections_text = "No benchmark results were found."
@@ -537,6 +734,7 @@ def render_markdown(
         summary_section=summary_section,
         feature_sections=feature_sections_text,
         regressions_block=regressions_block,
+        overrides_block=overrides_block,
         missing_block=moved_block + error_block + missing_block,
         history_section=history_section,
         history_marker_key=history_marker_key,
@@ -545,6 +743,8 @@ def render_markdown(
 
     summary_payload = {
         "has_regressions": has_regressions,
+        "has_unaccepted_regressions": has_unaccepted_regressions,
+        "accepted_regressions": total_accepted_regressions,
         "count": len(results),
         "backend": backend,
         "latest": latest_entry,
@@ -570,6 +770,7 @@ def main() -> int:
     parser.add_argument("--pr-number", type=int)
     parser.add_argument("--max-history", type=int, default=10)
     parser.add_argument("--omit-run-meta", action="store_true")
+    parser.add_argument("--regression-overrides-input")
     args = parser.parse_args()
 
     results = load_results(pathlib.Path(args.artifacts_dir))
@@ -582,6 +783,15 @@ def main() -> int:
                 history = history_data.get("history", [])
             elif isinstance(history_data, list):
                 history = history_data
+
+    override_config: dict[str, Any] | None = None
+    if args.regression_overrides_input:
+        override_path = pathlib.Path(args.regression_overrides_input)
+        if override_path.exists():
+            loaded_overrides = json.loads(override_path.read_text(encoding="utf-8"))
+            if not isinstance(loaded_overrides, dict):
+                raise ValueError("regression overrides input must be a JSON object")
+            override_config = loaded_overrides
 
     markdown, summary_payload = render_markdown(
         results,
@@ -597,6 +807,7 @@ def main() -> int:
         args.summary_template_path,
         args.history_template_path,
         args.omit_run_meta,
+        override_config,
     )
 
     pathlib.Path(args.markdown_output).write_text(markdown, encoding="utf-8")
