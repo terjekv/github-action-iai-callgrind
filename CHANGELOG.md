@@ -7,6 +7,8 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-22
+
 ### Added
 
 - Add opt-in, label-approved PR-body exceptions for intentional benchmark regressions while keeping

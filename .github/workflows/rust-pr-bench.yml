@@ -556,9 +556,11 @@ jobs:
           fi
           PR_NUMBER='${{ github.event.pull_request.number }}'
 
-          echo "run_at=$RUN_AT" >> "$GITHUB_OUTPUT"
-          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
-          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          {
+            echo "run_at=$RUN_AT"
+            echo "head_sha=$HEAD_SHA"
+            echo "pr_number=$PR_NUMBER"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Render IAI-Callgrind report
         id: render_callgrind
@@ -568,17 +570,17 @@ jobs:
           if [ '${{ inputs.regression_threshold_pct_iai_callgrind }}' != '-1' ]; then
             THRESHOLD='${{ inputs.regression_threshold_pct_iai_callgrind }}'
           fi
-          HISTORY_ARG=""
+          HISTORY_ARG=()
           if [ -f history-callgrind.json ]; then
-            HISTORY_ARG="--history-input history-callgrind.json"
+            HISTORY_ARG=(--history-input history-callgrind.json)
           fi
-          PR_ARG=""
+          PR_ARG=()
           if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
-            PR_ARG="--pr-number ${{ steps.report_meta.outputs.pr_number }}"
+            PR_ARG=(--pr-number "${{ steps.report_meta.outputs.pr_number }}")
           fi
-          OMIT_RUN_META_ARG=""
+          OMIT_RUN_META_ARG=()
           if [ "${{ inputs.backend }}" = "all" ]; then
-            OMIT_RUN_META_ARG="--omit-run-meta"
+            OMIT_RUN_META_ARG=(--omit-run-meta)
           fi
 
           python3 action-src/scripts/render_report.py \
@@ -592,9 +594,9 @@ jobs:
             --run-at "${{ steps.report_meta.outputs.run_at }}" \
             --max-history 10 \
             --regression-overrides-input regression-overrides.json \
-            $HISTORY_ARG \
-            $PR_ARG \
-            $OMIT_RUN_META_ARG
+            "${HISTORY_ARG[@]}" \
+            "${PR_ARG[@]}" \
+            "${OMIT_RUN_META_ARG[@]}"
 
           if [ "${{ inputs.backend }}" != "all" ]; then
             cat report-callgrind.md >> "$GITHUB_STEP_SUMMARY"
@@ -610,17 +612,17 @@ jobs:
           if [ '${{ inputs.regression_threshold_pct_criterion }}' != '-1' ]; then
             THRESHOLD='${{ inputs.regression_threshold_pct_criterion }}'
           fi
-          HISTORY_ARG=""
+          HISTORY_ARG=()
           if [ -f history-criterion.json ]; then
-            HISTORY_ARG="--history-input history-criterion.json"
+            HISTORY_ARG=(--history-input history-criterion.json)
           fi
-          PR_ARG=""
+          PR_ARG=()
           if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
-            PR_ARG="--pr-number ${{ steps.report_meta.outputs.pr_number }}"
+            PR_ARG=(--pr-number "${{ steps.report_meta.outputs.pr_number }}")
           fi
-          OMIT_RUN_META_ARG=""
+          OMIT_RUN_META_ARG=()
           if [ "${{ inputs.backend }}" = "all" ]; then
-            OMIT_RUN_META_ARG="--omit-run-meta"
+            OMIT_RUN_META_ARG=(--omit-run-meta)
           fi
 
           python3 action-src/scripts/render_report.py \
@@ -634,9 +636,9 @@ jobs:
             --run-at "${{ steps.report_meta.outputs.run_at }}" \
             --max-history 10 \
             --regression-overrides-input regression-overrides.json \
-            $HISTORY_ARG \
-            $PR_ARG \
-            $OMIT_RUN_META_ARG
+            "${HISTORY_ARG[@]}" \
+            "${PR_ARG[@]}" \
+            "${OMIT_RUN_META_ARG[@]}"
 
           if [ "${{ inputs.backend }}" != "all" ]; then
             cat report-criterion.md >> "$GITHUB_STEP_SUMMARY"
@@ -647,9 +649,9 @@ jobs:
       - name: Compose combined report (backend=all)
         if: inputs.backend == 'all'
         run: |
-          PR_ARG=""
+          PR_ARG=()
           if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
-            PR_ARG="--pr-number ${{ steps.report_meta.outputs.pr_number }}"
+            PR_ARG=(--pr-number "${{ steps.report_meta.outputs.pr_number }}")
           fi
 
           python3 action-src/scripts/compose_combined_report.py \
@@ -658,7 +660,7 @@ jobs:
             --report-criterion report-criterion.md \
             --run-at "${{ steps.report_meta.outputs.run_at }}" \
             --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
-            $PR_ARG
+            "${PR_ARG[@]}"
 
           cat report.md >> "$GITHUB_STEP_SUMMARY"
 
