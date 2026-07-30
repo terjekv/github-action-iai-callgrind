@@ -344,7 +344,7 @@ jobs:
 
       - name: Install cargo-binstall for exact-version runner dispatch
         if: ${{ matrix.backend == 'iai-callgrind' }}
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.2
         with:
           tool: cargo-binstall
 
