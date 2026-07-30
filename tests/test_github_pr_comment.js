@@ -112,6 +112,63 @@ test("loadHistory ignores malformed history payloads", async () => {
   assert.equal(fs.existsSync(historyPath), false);
 });
 
+test("loadHistory prefers new history and normalizes legacy backend entries", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-history-"));
+  const historyPath = path.join(tempDir, "history.json");
+  const github = makeGithub([
+    {
+      body:
+        '<!-- iai-callgrind-bench -->\n' +
+        '<!-- iai-callgrind-history: {"history":[{"backend":"iai-callgrind","commit":"old"}]} -->',
+    },
+    {
+      body:
+        '<!-- gungraun-bench -->\n' +
+        '<!-- gungraun-history: {"history":[{"backend":"iai","commit":"new"}]} -->',
+    },
+  ]);
+
+  await helper.loadHistory({
+    github,
+    context: makeContext(),
+    core: { info() {} },
+    historyPath,
+    historyKeys: ["gungraun-history", "iai-callgrind-history"],
+    markers: ["<!-- gungraun-bench -->", "<!-- iai-callgrind-bench -->"],
+    canonicalBackend: "gungraun",
+  });
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(historyPath, "utf8")), {
+    history: [{ backend: "gungraun", commit: "new" }],
+  });
+});
+
+test("loadHistory falls back from absent new key to legacy history", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-history-"));
+  const historyPath = path.join(tempDir, "history.json");
+  const github = makeGithub([
+    {
+      body:
+        '<!-- iai-callgrind-bench -->\n' +
+        '<!-- iai-callgrind-history: {"history":[{"backend":"callgrind","commit":"old"}]} -->',
+    },
+  ]);
+
+  await helper.loadHistory({
+    github,
+    context: makeContext(),
+    core: { info() {} },
+    historyPath,
+    historyKeys: ["gungraun-history", "iai-callgrind-history"],
+    markers: ["<!-- gungraun-bench -->", "<!-- iai-callgrind-bench -->"],
+    canonicalBackend: "gungraun",
+  });
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(historyPath, "utf8")), {
+    history: [{ backend: "gungraun", commit: "old" }],
+  });
+});
+
 test("loadPullRequestMetadata fetches the current body and label names", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-pr-metadata-"));
   const metadataPath = path.join(tempDir, "pr.json");
@@ -194,6 +251,32 @@ test("upsertReport updates an existing matching comment", async () => {
   assert.equal(github.state.updates.length, 1);
   assert.equal(github.state.creates.length, 0);
   assert.match(github.state.updates[0].body, /# report/);
+});
+
+test("upsertReport replaces a legacy marker with the canonical marker", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-report-"));
+  const reportPath = path.join(tempDir, "report.md");
+  fs.writeFileSync(reportPath, "# migrated report\n");
+  const github = makeGithub([
+    { id: 11, body: "<!-- iai-callgrind-bench -->\nold" },
+  ]);
+
+  await helper.upsertReport({
+    github,
+    context: makeContext(),
+    reportPath,
+    primaryMarker: "<!-- gungraun-bench -->",
+    markers: ["<!-- gungraun-bench -->", "<!-- iai-callgrind-bench -->"],
+    deleteExtras: false,
+  });
+
+  assert.equal(github.state.updates.length, 1);
+  assert.equal(github.state.creates.length, 0);
+  assert.match(github.state.updates[0].body, /^<!-- gungraun-bench -->/);
+  assert.doesNotMatch(
+    github.state.updates[0].body,
+    /<!-- iai-callgrind-bench -->/,
+  );
 });
 
 test("upsertReport deletes extra legacy comments in consolidated mode", async () => {

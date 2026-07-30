@@ -67,7 +67,7 @@ def main() -> int:
             backend_body = normalize_report_body(path)
             sections.append(
                 section_template.safe_substitute(
-                    backend_title="Callgrind",
+                    backend_title="Gungraun / IAI-Callgrind",
                     backend_body=backend_body,
                 ).strip()
             )

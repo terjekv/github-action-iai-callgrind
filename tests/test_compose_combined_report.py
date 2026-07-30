@@ -99,7 +99,7 @@ class ComposeCombinedReportTests(unittest.TestCase):
             )
 
             markdown = output.read_text(encoding="utf-8")
-            self.assertIn("## Callgrind", markdown)
+            self.assertIn("## Gungraun / IAI-Callgrind", markdown)
             self.assertNotIn("## Criterion", markdown)
 
     def test_no_backend_reports_fails_cleanly(self) -> None:

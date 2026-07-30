@@ -1,4 +1,4 @@
-## Criterion Benchmark Report
+## Rust PR Bench — Criterion Report
 
 Regression threshold: **10.00%**
 Comparison statistic: **median** (ns)

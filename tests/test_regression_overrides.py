@@ -190,6 +190,37 @@ class RegressionOverrideTests(unittest.TestCase):
             len(regression_overrides.parse_directives(directive(disjoint))), 2
         )
 
+    def test_gungraun_scope_normalizes_and_matches_v2_results(self) -> None:
+        rules = regression_overrides.parse_directives(
+            directive(
+                '[{"benchmark":"a","backend":"gungraun",'
+                '"max_regression_pct":10,"reason":"migration"}]'
+            )
+        )
+
+        self.assertEqual(rules[0]["backend"], "iai-callgrind")
+        self.assertTrue(
+            regression_overrides.rule_matches_result(
+                rules[0], "gungraun", "default", "a"
+            )
+        )
+        self.assertTrue(
+            regression_overrides.rule_matches_result(
+                rules[0], "iai-callgrind", "default", "a"
+            )
+        )
+
+    def test_new_and_legacy_backend_scopes_overlap_after_normalization(self) -> None:
+        overlapping = """[
+          {"benchmark":"a","backend":"gungraun","max_regression_pct":10,"reason":"new"},
+          {"benchmark":"a","backend":"iai-callgrind","max_regression_pct":20,"reason":"old"}
+        ]"""
+        with self.assertRaisesRegex(
+            regression_overrides.RegressionOverrideError,
+            "overlap",
+        ):
+            regression_overrides.parse_directives(directive(overlapping))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -69,6 +69,45 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("${HEAD_RUN_ARGS:+ $HEAD_RUN_ARGS}", benchmark_block)
         self.assertIn("RUST_SYSROOT=", benchmark_block)
         self.assertIn("${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}", benchmark_block)
+        self.assertIn("IAI_CALLGRIND_RUNNER:", precompile_block)
+        self.assertIn("GUNGRAUN_RUNNER:", precompile_block)
+        self.assertIn("IAI_CALLGRIND_RUNNER:", benchmark_block)
+        self.assertIn("GUNGRAUN_RUNNER:", benchmark_block)
+
+    def test_workflow_dispatches_exact_old_and_new_runner_versions(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
+            encoding="utf-8"
+        )
+        benchmark_block = extract_job_block(workflow, "benchmark")
+
+        self.assertIn("scripts/iai-callgrind-runner-dispatch", workflow)
+        self.assertIn("scripts/gungraun-runner-dispatch", workflow)
+        self.assertIn("taiki-e/install-action@v2", benchmark_block)
+        self.assertNotIn("cargo install --locked iai-callgrind-runner", workflow)
+
+    def test_v2_accepts_gungraun_while_preserving_default_and_wire_names(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
+            encoding="utf-8"
+        )
+        report_block = extract_job_block(workflow, "report")
+
+        self.assertIn("default: \"iai-callgrind\"", workflow)
+        self.assertIn("scripts/backend_names.py --selection", workflow)
+        self.assertIn("normalized_backend:", workflow)
+        self.assertIn("artifacts-iai-callgrind", report_block)
+        self.assertIn('HISTORY_KEY: "iai-callgrind-history"', report_block)
+        self.assertIn('PRIMARY_MARKER: "<!-- iai-callgrind-bench -->"', report_block)
+
+    def test_new_and_legacy_callgrind_thresholds_are_resolved_together(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
+            encoding="utf-8"
+        )
+        report_block = extract_job_block(workflow, "report")
+
+        self.assertIn("regression_threshold_pct_gungraun:", workflow)
+        self.assertIn("scripts/resolve_threshold.py", report_block)
+        self.assertIn("--gungraun=", report_block)
+        self.assertIn("--iai-callgrind=", report_block)
 
     def test_binary_artifacts_are_separate_from_report_inputs(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
@@ -116,6 +155,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn(
             "regression_override_label: ${{ inputs.regression_override_label }}", wrapper
         )
+        self.assertIn("regression_threshold_pct_gungraun:", wrapper)
+        self.assertIn(
+            "regression_threshold_pct_gungraun: "
+            "${{ inputs.regression_threshold_pct_gungraun }}",
+            wrapper,
+        )
         self.assertIn("has_regressions:", wrapper)
         self.assertIn("has_unaccepted_regressions:", wrapper)
 
@@ -136,6 +181,45 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("fail_on_regression: true", bench_block)
         self.assertIn("outputs.has_regressions", output_block)
         self.assertIn("outputs.has_unaccepted_regressions", output_block)
+
+    def test_sample_workflow_exercises_old_new_and_mixed_runner_families(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "sample-self-test.yml").read_text(
+            encoding="utf-8"
+        )
+        old_block = extract_job_block(workflow, "bench-sample-callgrind")
+        new_block = extract_job_block(workflow, "bench-sample-gungraun")
+        mixed_block = extract_job_block(workflow, "bench-sample-mixed-migration")
+
+        self.assertIn("backend: iai-callgrind", old_block)
+        self.assertIn("sample_iai_callgrind_compat_bench", old_block)
+        self.assertIn("backend: gungraun", new_block)
+        self.assertIn("sample_callgrind_bench", new_block)
+        self.assertIn(
+            '"base":{"bench":"sample_iai_callgrind_compat_bench"}',
+            mixed_block,
+        )
+        self.assertIn('"bench":"sample_callgrind_bench"', mixed_block)
+
+        manifest = (
+            REPO_ROOT / "examples" / "sample-rust-app" / "Cargo.toml"
+        ).read_text(encoding="utf-8")
+        canonical = (
+            REPO_ROOT
+            / "examples"
+            / "sample-rust-app"
+            / "benches"
+            / "sample_callgrind_bench.rs"
+        ).read_text(encoding="utf-8")
+        compatibility = (
+            REPO_ROOT
+            / "examples"
+            / "sample-rust-app"
+            / "benches"
+            / "sample_iai_callgrind_compat_bench.rs"
+        ).read_text(encoding="utf-8")
+        self.assertIn('gungraun = "0.19.4"', manifest)
+        self.assertIn("use gungraun::", canonical)
+        self.assertIn("use iai_callgrind::", compatibility)
 
     def test_release_workflow_publishes_on_version_tags(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(

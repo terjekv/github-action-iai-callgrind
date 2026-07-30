@@ -7,6 +7,36 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-07-30
+
+### Added
+
+- Add `gungraun` as a v2-compatible backend name and
+  `regression_threshold_pct_gungraun` as the preferred Callgrind-family threshold input.
+- Add exact-version package-specific dispatchers for `iai-callgrind-runner 0.16.1` and
+  `gungraun-runner >= 0.17.0`, preferring `cargo-binstall` and falling back to
+  `cargo install --locked`.
+- Add a Gungraun 0.19.4 sample fixture plus old-only, new-only, mixed-runner, combined, and
+  autodiscovery self-test coverage.
+
+### Changed
+
+- Brand the workflow and reports as Rust PR Bench with Gungraun / IAI-Callgrind and Criterion
+  backends.
+- Recognize `gungraun`, `iai_callgrind`, and `callgrind` benchmark filenames during
+  autodiscovery, and normalize Gungraun names in benchmark specs and regression exceptions.
+- Bake both runner dispatcher paths into precompiled benchmark executables so base and head can
+  request different runner families and exact versions.
+- Update all Cargo lockfile dependencies and versioned GitHub Actions to their latest releases,
+  and add weekly Dependabot coverage for GitHub Actions.
+
+### Fixed
+
+- Normalize `target/iai` and `target/gungraun` Callgrind metric paths so detailed metrics pair
+  across a migration.
+- Reject conflicting new and legacy Callgrind threshold inputs with an actionable error.
+- Generalize runner/library mismatch diagnostics for both IAI-Callgrind and Gungraun.
+
 ## [2.2.0] - 2026-07-22
 
 ### Added

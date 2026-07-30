@@ -1,11 +1,21 @@
-# github-action-iai-callgrind
+# Rust PR Bench
 
-Reusable GitHub workflow for benchmarking Rust PRs with `iai-callgrind`, `criterion`, or both (`backend: all`), and posting base-vs-head reports.
+Rust PR Bench is a reusable GitHub workflow for benchmarking Rust pull requests with
+[Gungraun](https://gungraun.github.io/gungraun/), its `iai-callgrind` predecessor,
+Criterion, or both (`backend: all`), and posting base-vs-head reports.
+
+The repository remains `terjekv/github-action-iai-callgrind` so existing reusable-workflow
+references stay valid. The canonical workflow remains `.github/workflows/rust-pr-bench.yml`;
+the old `.github/workflows/iai-callgrind-pr-bench.yml` path is a supported compatibility wrapper.
+This is intentional because [GitHub Actions does not follow repository-rename redirects in
+`uses:` references](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations).
 
 ## What this provides
 
 - Runs configured benchmark targets for a matrix of feature sets.
-- Supports `iai-callgrind`, `criterion`, or `all` via the `backend` input.
+- Supports `gungraun`, `iai-callgrind`, `criterion`, or `all` via the `backend` input.
+- Installs the exact runner version requested by each benchmark binary, including mixed
+  `iai-callgrind` base and Gungraun head comparisons.
 - Compares `head` (`github.sha`) against PR base (`pull_request.base.sha`) in the same matrix job.
 - Publishes a sticky PR comment with grouped markdown tables and per-benchmark metric breakdowns.
 - Optionally fails CI when unaccepted regressions exceed a threshold.
@@ -45,7 +55,7 @@ jobs:
           {"name":"default","features":""},
           {"name":"simd","features":"simd"}
         ]
-      regression_threshold_pct_iai_callgrind: 3
+      regression_threshold_pct_gungraun: 3
       regression_threshold_pct_criterion: 10
       fail_on_regression: true
 ```
@@ -72,7 +82,7 @@ jobs:
       fail_on_regression: true
 ```
 
-#### 3. Callgrind only, for instruction-level regression gating
+#### 3. Gungraun only, for instruction-level regression gating
 
 Best when you want stricter deterministic gating on callgrind event counts.
 
@@ -86,14 +96,14 @@ jobs:
   bench:
     uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2
     with:
-      backend: iai-callgrind
+      backend: gungraun
       auto_discover: true
       feature_sets_json: >-
         [
           {"name":"default","features":""},
           {"name":"simd","features":"simd"}
         ]
-      regression_threshold_pct_iai_callgrind: 3
+      regression_threshold_pct_gungraun: 3
       fail_on_regression: true
 ```
 
@@ -115,7 +125,7 @@ jobs:
       working_directory: crates/engine
       benchmarks_json: >-
         [
-          {"name":"parser_callgrind","bench":"parser_callgrind","backend":"iai-callgrind"},
+          {"name":"parser_gungraun","bench":"parser_callgrind","backend":"gungraun"},
           {"name":"parser_criterion","bench":"parser_criterion","backend":"criterion","criterion_args":"--noplot --sample-size 50"}
         ]
       feature_sets_json: >-
@@ -128,8 +138,11 @@ jobs:
 
 ## Inputs
 
-- `backend` (`iai-callgrind` | `criterion` | `all`, default `iai-callgrind`)
+- `backend` (`gungraun` | `iai-callgrind` | `criterion` | `all`, default `iai-callgrind`
+  throughout v2)
   - Selects benchmark backend(s) and reporting mode.
+  - `gungraun`, `iai-callgrind`, `iai`, and `callgrind` select the same Callgrind
+    reporting backend in v2. The v2 wire value remains `iai-callgrind`.
 - `benchmarks_json` (string, default `[]`)
   - JSON array of benchmark specs.
   - String entry means bench target name, e.g. `"parser_bench"`.
@@ -138,15 +151,17 @@ jobs:
     - `bench`: cargo bench target name (for `cargo bench --bench ...` mode)
     - `command`: full command override
     - `manifest_path`, `package`, `args`: optional command helpers
-    - `backend`: optional (`iai-callgrind` or `criterion`) to include spec only for one backend
+    - `backend`: optional (`gungraun`, a legacy Callgrind alias, or `criterion`) to include
+      the spec only for one backend
     - `criterion_args`: optional Criterion bench-binary args for this benchmark
     - `head_command`, `base_command`, `head`, `base`: optional per-side overrides for moved or renamed benchmarks
 - `auto_discover` (boolean, default `true`)
   - When `benchmarks_json` is empty, discovers benchmarks from `benches/*.rs`.
   - At a workspace root, also discovers member `benches/*.rs` targets from workspace members.
   - Name-based backend routing for discovery:
-    - contains `criterion` (and not `callgrind`) => Criterion only
-    - contains `callgrind` (and not `criterion`) => IAI-Callgrind only
+    - contains `criterion` (and no Callgrind-family marker) => Criterion only
+    - contains `gungraun`, `iai_callgrind`, or `callgrind` (and not `criterion`) =>
+      Gungraun / IAI-Callgrind only
     - otherwise => included for both backends
 - `auto_detect_moved_benchmarks` (boolean, default `false`)
   - Opt-in moved-benchmark detection for autodiscovered workspace benches.
@@ -165,9 +180,12 @@ jobs:
   - Statistic used for Criterion base-vs-head comparison deltas.
 - `base_sha` (string, optional override)
 - `regression_threshold_pct` (number, default `3`)
+- `regression_threshold_pct_gungraun` (number, default `-1`)
+  - Preferred backend-specific threshold for Gungraun and legacy IAI-Callgrind benchmarks.
+  - `-1` falls back to `regression_threshold_pct_iai_callgrind`, then the generic threshold.
 - `regression_threshold_pct_iai_callgrind` (number, default `-1`)
-  - Optional backend-specific threshold override for `iai-callgrind`.
-  - `-1` means "use `regression_threshold_pct`".
+  - Compatibility name for the same Callgrind-family threshold.
+  - If both specific names are set, they must have the same value or the workflow fails.
 - `regression_threshold_pct_criterion` (number, default `-1`)
   - Optional backend-specific threshold override for `criterion`.
   - `-1` means "use `regression_threshold_pct`".
@@ -217,7 +235,7 @@ Then add exactly one `rust-pr-bench` fenced JSON block to the PR body:
   "accept_regressions": [
     {
       "benchmark": "verify_password",
-      "backend": "iai-callgrind",
+      "backend": "gungraun",
       "feature": "default",
       "max_regression_pct": 35,
       "reason": "Constant-time verification required by the security fix"
@@ -239,7 +257,9 @@ Each rule has these fields:
   A number is the maximum total head-over-base delta, not extra tolerance. For example, `35`
   accepts up to `+35%`.
 - `reason` (required): non-empty audit explanation shown in the report.
-- `backend` (optional): exact `iai-callgrind` or `criterion`; omission applies to both backends.
+- `backend` (optional): `gungraun`, a legacy Callgrind alias, or `criterion`; omission
+  applies to both backends. Callgrind aliases normalize to one scope, so new and legacy
+  names for the same benchmark overlap.
 - `feature` (optional): exact feature-set name; omission applies to all feature sets.
 
 Exceptions apply to the benchmark-level delta used by the gate. Metric-breakdown rows remain
@@ -294,13 +314,16 @@ If `working_directory` is a Cargo workspace root, it also scans each workspace m
 
 Backend routing is based on the benchmark filename:
 
-- contains `criterion` and not `callgrind` => Criterion only
-- contains `callgrind` and not `criterion` => IAI-Callgrind only
+- contains `criterion` and no Callgrind-family marker => Criterion only
+- contains `gungraun`, `iai_callgrind`, or `callgrind` and not `criterion` =>
+  Gungraun / IAI-Callgrind only
 - contains neither => included for both backends
 
 Examples:
 
-- `parser_callgrind.rs` => IAI-Callgrind only
+- `parser_gungraun.rs` => Gungraun / IAI-Callgrind only
+- `parser_iai_callgrind.rs` => Gungraun / IAI-Callgrind only
+- `parser_callgrind.rs` => Gungraun / IAI-Callgrind only
 - `parser_criterion.rs` => Criterion only
 - `parser.rs` => both backends
 
@@ -335,7 +358,7 @@ benchmarks_json: >-
   [
     {
       "name":"parser_callgrind",
-      "backend":"iai-callgrind",
+      "backend":"gungraun",
       "bench":"parser_callgrind_new",
       "manifest_path":"crates/new-parser/Cargo.toml",
       "base":{
@@ -349,10 +372,17 @@ benchmarks_json: >-
 ## Notes
 
 - Lower values are treated as better for both backends:
-  - `iai-callgrind`: callgrind summary event counts
+  - Gungraun / `iai-callgrind`: Callgrind summary event counts
   - `criterion`: selected estimate statistic (`mean` or `median`, unit `ns`)
 - With `backend: all`, the workflow posts a single consolidated PR comment with one section per backend.
-- The workflow installs `valgrind` and `iai-callgrind-runner` only for `iai-callgrind`.
+- The workflow installs Valgrind only for the Callgrind family. It sets both
+  `GUNGRAUN_RUNNER` and `IAI_CALLGRIND_RUNNER` to package-specific dispatchers. Each
+  dispatcher validates the library version passed by the benchmark, reuses an exact-version
+  cache, prefers a prebuilt `cargo-binstall` installation, and falls back to
+  `cargo install --locked`.
+- The v2 bridge supports the existing `iai-callgrind 0.16.1` baseline and Gungraun
+  versions beginning at `0.17.0`. This permits a base revision on the old package and a
+  head revision on Gungraun in the same comparison.
 - Standard `cargo bench --bench <target>` commands are precompiled once per revision and feature
   set. The resulting benchmark executables are distributed to the per-benchmark jobs, preserving
   parallel benchmark execution without rebuilding shared application dependencies for every case.
@@ -385,7 +415,7 @@ That means Criterion's own defaults still apply unless you override them:
 - measurement time: `5s`
 - noise threshold: `1%`
 
-On shared CI runners, seeing about `1-3%` variation on unchanged code is not unusual. If you see that level of noise, treat Criterion as a higher-variance signal than `iai-callgrind` and tune it explicitly.
+On shared CI runners, seeing about `1-3%` variation on unchanged code is not unusual. If you see that level of noise, treat Criterion as a higher-variance signal than Gungraun / `iai-callgrind` and tune it explicitly.
 
 Recommended ways to reduce noise:
 
@@ -428,7 +458,32 @@ benchmarks_json: >-
 
 This repository includes a sample Rust project at `examples/sample-rust-app`.
 
-- It has an `iai-callgrind` benchmark target: `sample_callgrind_bench`.
+- It has an `iai-callgrind 0.16.1` compatibility target:
+  `sample_iai_callgrind_compat_bench`.
+- Its retained canonical Callgrind target, `sample_callgrind_bench`, uses Gungraun 0.19.4.
 - It has a `criterion` benchmark target: `sample_criterion_bench`.
 - It defines two feature sets: `default` and `alt-impl`.
-- The workflow `.github/workflows/sample-self-test.yml` runs fast script/unit tests first, then validates explicit callgrind, explicit criterion, combined `backend: all`, and autodiscovery modes against the sample fixture on pull requests.
+- The workflow `.github/workflows/sample-self-test.yml` runs fast script/unit tests first,
+  then validates old-only, new-only, mixed old/new, combined `backend: all`, and autodiscovery
+  modes against the sample fixture on pull requests.
+
+## Migrating consumers to Gungraun
+
+Move callers to the v2 bridge before changing their benchmark crate. Callers pinned to `v1`
+or an immutable SHA must explicitly update to `v2.3` (or the current v2 compatibility release);
+floating `v1` remains on its compatible implementation.
+
+The consumer migration is mechanical:
+
+1. Rename the Cargo dependency from `iai-callgrind` to `gungraun = "0.19.4"`.
+2. Replace Rust imports from `iai_callgrind::...` with `gungraun::...`.
+3. If the consumer manages the runner directly, replace `iai-callgrind-runner` and
+   `IAI_CALLGRIND_RUNNER` with `gungraun-runner` and `GUNGRAUN_RUNNER`.
+4. Change workflow specs from `backend: iai-callgrind` to `backend: gungraun` and from
+   `regression_threshold_pct_iai_callgrind` to `regression_threshold_pct_gungraun`.
+5. Initially retain benchmark target filenames. Stable target names preserve base/head metric
+   pairing and PR history while the dependency changes.
+
+Version 3 will default to and serialize `gungraun`, migrate old history/comment markers in place,
+and keep `iai-callgrind`, `iai`, and `callgrind` as deprecated aliases. Those aliases will remain
+supported through every v3 release and will not be removed before v4.

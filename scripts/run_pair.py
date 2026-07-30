@@ -6,17 +6,15 @@ import pathlib
 import re
 import shlex
 import subprocess
+import sys
 import time
 from typing import Any
 
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-def normalize_backend(raw: str) -> str:
-    value = raw.strip().lower()
-    if value in {"iai", "iai-callgrind", "callgrind"}:
-        return "iai-callgrind"
-    if value in {"criterion"}:
-        return "criterion"
-    raise ValueError(f"unsupported backend '{raw}' (expected 'iai-callgrind' or 'criterion')")
+from backend_names import normalize_backend  # noqa: E402
 
 
 def parse_callgrind_summary(path: pathlib.Path) -> int | None:
@@ -53,8 +51,10 @@ def scan_callgrind_files(target_dir: pathlib.Path) -> list[pathlib.Path]:
 
 def normalize_callgrind_metric_name(path: pathlib.Path) -> str:
     # callgrind filenames can include run-specific numeric suffixes (for example PID).
-    # Strip trailing ".<digits>" to make base/head metric keys comparable.
-    normalized = re.sub(r"\.\d+$", "", path.as_posix())
+    # Strip trailing ".<digits>" and normalize the renamed output directory so an
+    # iai-callgrind base can be paired with a Gungraun head.
+    parts = ["iai" if part in {"iai", "gungraun"} else part for part in path.parts]
+    normalized = re.sub(r"\.\d+$", "", pathlib.PurePosixPath(*parts).as_posix())
     return normalized
 
 
@@ -246,9 +246,19 @@ def is_missing_feature_error(output: str) -> bool:
     )
 
 
-def is_iai_version_mismatch_error(output: str) -> bool:
+def runner_version_mismatch_family(output: str) -> str | None:
     lowered = output.lower()
-    return "iai-callgrind-runner" in lowered and "is newer than iai-callgrind" in lowered
+    mismatch_text = any(
+        marker in lowered
+        for marker in ("version mismatch", " is newer than ", " is older than ")
+    )
+    if not mismatch_text:
+        return None
+    if "gungraun-runner" in lowered:
+        return "gungraun"
+    if "iai-callgrind-runner" in lowered:
+        return "iai-callgrind"
+    return None
 
 
 def run_command(
@@ -286,9 +296,12 @@ def run_command(
             return {"total": 0, "metrics": [], "missing": True, "missing_reason": "bench target not found"}
         if is_missing_feature_error(output):
             return {"total": 0, "metrics": [], "missing": True, "missing_reason": "feature not available"}
-        error_reason = None
-        if is_iai_version_mismatch_error(output):
-            error_reason = "iai-callgrind version mismatch"
+        mismatch_family = runner_version_mismatch_family(output)
+        error_reason = (
+            f"{mismatch_family} runner/library version mismatch"
+            if mismatch_family
+            else None
+        )
         return {
             "total": 0,
             "metrics": [],
@@ -406,10 +419,13 @@ def main() -> int:
             if not output:
                 return
             reason = data.get("error_reason")
-            if reason == "iai-callgrind version mismatch":
+            if reason and reason.endswith("runner/library version mismatch"):
+                family = reason.removesuffix(" runner/library version mismatch")
+                runner = f"{family}-runner"
                 print(
-                    f"[{label}] error: iai-callgrind-runner is newer than the crate. "
-                    "Update the repo's iai-callgrind dependency to match the runner version."
+                    f"[{label}] error: {runner} does not match the {family} library. "
+                    "Rust PR Bench normally dispatches the exact requested version; ensure "
+                    "IAI_CALLGRIND_RUNNER and GUNGRAUN_RUNNER were not overridden, then retry."
                 )
             log_path = output_dir / f"{label}.error.log"
             log_path.write_text(output, encoding="utf-8")

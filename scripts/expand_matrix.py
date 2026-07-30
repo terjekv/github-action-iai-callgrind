@@ -10,24 +10,17 @@ import sys
 import tomllib
 from typing import Any
 
-BACKENDS = ("iai-callgrind", "criterion")
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from backend_names import (  # noqa: E402
+    BACKENDS,
+    normalize_backend,
+    normalize_backend_selection,
+)
+
 NATIVE_TARGET_CPU_RE = re.compile(r"target-cpu\s*=\s*native", re.IGNORECASE)
-
-
-def normalize_backend(raw: str) -> str:
-    value = raw.strip().lower()
-    if value in {"iai", "iai-callgrind", "callgrind"}:
-        return "iai-callgrind"
-    if value in {"criterion"}:
-        return "criterion"
-    raise ValueError(f"unsupported backend '{raw}' (expected 'iai-callgrind' or 'criterion')")
-
-
-def normalize_backend_selection(raw: str) -> str:
-    value = raw.strip().lower()
-    if value in {"all", "any"}:
-        return "all"
-    return normalize_backend(raw)
 
 
 def expand_backends(selection: str) -> list[str]:
@@ -38,7 +31,9 @@ def expand_backends(selection: str) -> list[str]:
 
 def infer_name_backend(name: str) -> str | None:
     lowered = name.lower()
-    has_callgrind = "callgrind" in lowered
+    has_callgrind = any(
+        marker in lowered for marker in ("gungraun", "iai_callgrind", "callgrind")
+    )
     has_criterion = "criterion" in lowered
     if has_callgrind and not has_criterion:
         return "iai-callgrind"

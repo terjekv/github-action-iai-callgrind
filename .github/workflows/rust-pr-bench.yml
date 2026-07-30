@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       backend:
-        description: Benchmark backend to use (iai-callgrind, criterion, or all).
+        description: Benchmark backend to use (gungraun, iai-callgrind, criterion, or all).
         required: false
         type: string
         default: "iai-callgrind"
@@ -79,8 +79,15 @@ on:
         default: 3
       regression_threshold_pct_iai_callgrind:
         description: >-
-          Optional override threshold for iai-callgrind backend. Use -1 to fall back to
-          regression_threshold_pct.
+          Compatibility name for the Gungraun / IAI-Callgrind threshold. Use -1 to
+          fall back to regression_threshold_pct.
+        required: false
+        type: number
+        default: -1
+      regression_threshold_pct_gungraun:
+        description: >-
+          Optional override threshold for the Gungraun / IAI-Callgrind backend.
+          Use -1 to fall back to the legacy-specific or generic threshold.
         required: false
         type: number
         default: -1
@@ -130,6 +137,7 @@ jobs:
       binary_artifact_prefix: ${{ steps.artifact_prefix.outputs.binary_value }}
       base_sha: ${{ steps.refs.outputs.base_sha }}
       head_sha: ${{ steps.refs.outputs.head_sha }}
+      normalized_backend: ${{ steps.backend.outputs.value }}
     steps:
       - name: Validate action source inputs
         if: ${{ inputs.action_repository != 'terjekv/github-action-iai-callgrind' && inputs.action_ref == '' }}
@@ -143,6 +151,14 @@ jobs:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref }}
           path: action-src
+
+      - name: Normalize backend name
+        id: backend
+        env:
+          BACKEND_INPUT: ${{ inputs.backend }}
+        run: |
+          BACKEND="$(python3 action-src/scripts/backend_names.py --selection "$BACKEND_INPUT")"
+          echo "value=$BACKEND" >> "$GITHUB_OUTPUT"
 
       - name: Checkout caller repository
         uses: actions/checkout@v7
@@ -213,6 +229,10 @@ jobs:
   precompile:
     runs-on: ubuntu-latest
     needs: prepare-matrix
+    env:
+      IAI_CALLGRIND_RUNNER: ${{ github.workspace }}/action-src/scripts/iai-callgrind-runner-dispatch
+      GUNGRAUN_RUNNER: ${{ github.workspace }}/action-src/scripts/gungraun-runner-dispatch
+      RUST_PR_BENCH_RUNNER_CACHE: ${{ github.workspace }}/.rust-pr-bench-runners
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.build_matrix) }}
@@ -268,6 +288,10 @@ jobs:
     needs:
       - prepare-matrix
       - precompile
+    env:
+      IAI_CALLGRIND_RUNNER: ${{ github.workspace }}/action-src/scripts/iai-callgrind-runner-dispatch
+      GUNGRAUN_RUNNER: ${{ github.workspace }}/action-src/scripts/gungraun-runner-dispatch
+      RUST_PR_BENCH_RUNNER_CACHE: ${{ github.workspace }}/.rust-pr-bench-runners
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
@@ -318,15 +342,17 @@ jobs:
         with:
           toolchain: ${{ inputs.toolchain }}
 
-      - name: Ensure iai-callgrind runner is available
+      - name: Install cargo-binstall for exact-version runner dispatch
+        if: ${{ matrix.backend == 'iai-callgrind' }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Validate exact-version runner dispatchers
         if: ${{ matrix.backend == 'iai-callgrind' }}
         run: |
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          if ! command -v iai-callgrind-runner >/dev/null 2>&1; then
-            cargo install --locked iai-callgrind-runner
-          fi
-
-          echo "IAI_CALLGRIND_RUNNER=$(command -v iai-callgrind-runner)" >> "$GITHUB_ENV"
+          test -x "$IAI_CALLGRIND_RUNNER"
+          test -x "$GUNGRAUN_RUNNER"
 
       - name: Ensure valgrind is available
         if: ${{ matrix.backend == 'iai-callgrind' }}
@@ -479,8 +505,8 @@ jobs:
               shutil.copy2(path, dest)
           PY
 
-      - name: Load IAI-Callgrind PR history
-        if: github.event_name == 'pull_request' && inputs.backend != 'criterion'
+      - name: Load Gungraun / IAI-Callgrind PR history
+        if: github.event_name == 'pull_request' && needs.prepare-matrix.outputs.normalized_backend != 'criterion'
         uses: actions/github-script@v9
         env:
           HISTORY_PATH: history-callgrind.json
@@ -499,7 +525,7 @@ jobs:
             });
 
       - name: Load Criterion PR history
-        if: github.event_name == 'pull_request' && inputs.backend != 'iai-callgrind'
+        if: github.event_name == 'pull_request' && needs.prepare-matrix.outputs.normalized_backend != 'iai-callgrind'
         uses: actions/github-script@v9
         env:
           HISTORY_PATH: history-criterion.json
@@ -546,6 +572,17 @@ jobs:
             --approval-label "$REGRESSION_OVERRIDE_LABEL" \
             --output regression-overrides.json
 
+      - name: Resolve Gungraun / IAI-Callgrind regression threshold
+        id: threshold_callgrind
+        run: |
+          THRESHOLD="$(
+            python3 action-src/scripts/resolve_threshold.py \
+              --generic='${{ inputs.regression_threshold_pct }}' \
+              --gungraun='${{ inputs.regression_threshold_pct_gungraun }}' \
+              --iai-callgrind='${{ inputs.regression_threshold_pct_iai_callgrind }}'
+          )"
+          echo "value=$THRESHOLD" >> "$GITHUB_OUTPUT"
+
       - name: Resolve report metadata
         id: report_meta
         run: |
@@ -562,14 +599,11 @@ jobs:
             echo "pr_number=$PR_NUMBER"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Render IAI-Callgrind report
+      - name: Render Gungraun / IAI-Callgrind report
         id: render_callgrind
-        if: inputs.backend != 'criterion'
+        if: needs.prepare-matrix.outputs.normalized_backend != 'criterion'
         run: |
-          THRESHOLD='${{ inputs.regression_threshold_pct }}'
-          if [ '${{ inputs.regression_threshold_pct_iai_callgrind }}' != '-1' ]; then
-            THRESHOLD='${{ inputs.regression_threshold_pct_iai_callgrind }}'
-          fi
+          THRESHOLD='${{ steps.threshold_callgrind.outputs.value }}'
           HISTORY_ARG=()
           if [ -f history-callgrind.json ]; then
             HISTORY_ARG=(--history-input history-callgrind.json)
@@ -579,7 +613,7 @@ jobs:
             PR_ARG=(--pr-number "${{ steps.report_meta.outputs.pr_number }}")
           fi
           OMIT_RUN_META_ARG=()
-          if [ "${{ inputs.backend }}" = "all" ]; then
+          if [ "${{ needs.prepare-matrix.outputs.normalized_backend }}" = "all" ]; then
             OMIT_RUN_META_ARG=(--omit-run-meta)
           fi
 
@@ -598,7 +632,7 @@ jobs:
             "${PR_ARG[@]}" \
             "${OMIT_RUN_META_ARG[@]}"
 
-          if [ "${{ inputs.backend }}" != "all" ]; then
+          if [ "${{ needs.prepare-matrix.outputs.normalized_backend }}" != "all" ]; then
             cat report-callgrind.md >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
@@ -606,7 +640,7 @@ jobs:
 
       - name: Render Criterion report
         id: render_criterion
-        if: inputs.backend != 'iai-callgrind'
+        if: needs.prepare-matrix.outputs.normalized_backend != 'iai-callgrind'
         run: |
           THRESHOLD='${{ inputs.regression_threshold_pct }}'
           if [ '${{ inputs.regression_threshold_pct_criterion }}' != '-1' ]; then
@@ -621,7 +655,7 @@ jobs:
             PR_ARG=(--pr-number "${{ steps.report_meta.outputs.pr_number }}")
           fi
           OMIT_RUN_META_ARG=()
-          if [ "${{ inputs.backend }}" = "all" ]; then
+          if [ "${{ needs.prepare-matrix.outputs.normalized_backend }}" = "all" ]; then
             OMIT_RUN_META_ARG=(--omit-run-meta)
           fi
 
@@ -640,14 +674,14 @@ jobs:
             "${PR_ARG[@]}" \
             "${OMIT_RUN_META_ARG[@]}"
 
-          if [ "${{ inputs.backend }}" != "all" ]; then
+          if [ "${{ needs.prepare-matrix.outputs.normalized_backend }}" != "all" ]; then
             cat report-criterion.md >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
           echo "has_unaccepted_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_unaccepted_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
 
       - name: Compose combined report (backend=all)
-        if: inputs.backend == 'all'
+        if: needs.prepare-matrix.outputs.normalized_backend == 'all'
         run: |
           PR_ARG=()
           if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
@@ -687,7 +721,7 @@ jobs:
       - name: Build report artifact name
         id: report_artifact_name
         run: |
-          echo "value=bench-report-${{ inputs.backend }}-${{ github.run_id }}-${{ github.run_attempt }}-$(date +%s%N)" >> "$GITHUB_OUTPUT"
+          echo "value=bench-report-${{ needs.prepare-matrix.outputs.normalized_backend }}-${{ github.run_id }}-${{ github.run_attempt }}-$(date +%s%N)" >> "$GITHUB_OUTPUT"
 
       - name: Upload report artifact
         uses: actions/upload-artifact@v7
@@ -698,11 +732,11 @@ jobs:
             summary-*.json
             regression-overrides.json
 
-      - name: Upsert IAI-Callgrind PR comment
+      - name: Upsert Gungraun / IAI-Callgrind PR comment
         if: >-
           github.event_name == 'pull_request' &&
-          inputs.backend != 'all' &&
-          inputs.backend != 'criterion' &&
+          needs.prepare-matrix.outputs.normalized_backend != 'all' &&
+          needs.prepare-matrix.outputs.normalized_backend != 'criterion' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_callgrind.outputs.has_regressions == 'true'))
         uses: actions/github-script@v9
@@ -725,8 +759,8 @@ jobs:
       - name: Upsert Criterion PR comment
         if: >-
           github.event_name == 'pull_request' &&
-          inputs.backend != 'all' &&
-          inputs.backend != 'iai-callgrind' &&
+          needs.prepare-matrix.outputs.normalized_backend != 'all' &&
+          needs.prepare-matrix.outputs.normalized_backend != 'iai-callgrind' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_criterion.outputs.has_regressions == 'true'))
         uses: actions/github-script@v9
@@ -749,7 +783,7 @@ jobs:
       - name: Upsert consolidated PR comment (backend=all)
         if: >-
           github.event_name == 'pull_request' &&
-          inputs.backend == 'all' &&
+          needs.prepare-matrix.outputs.normalized_backend == 'all' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_overall.outputs.has_regressions == 'true'))
         uses: actions/github-script@v9

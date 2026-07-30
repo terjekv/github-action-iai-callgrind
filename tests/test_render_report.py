@@ -75,6 +75,33 @@ def criterion_results() -> list[dict]:
 
 
 class RenderReportTests(unittest.TestCase):
+    def test_gungraun_input_preserves_v2_serialized_backend_and_history_key(
+        self,
+    ) -> None:
+        results = callgrind_results()
+        for result in results:
+            result["backend"] = "gungraun"
+
+        markdown, summary = render_report.render_markdown(
+            results,
+            3.0,
+            "gungraun",
+            None,
+            "head",
+            None,
+            [],
+            10,
+            "iai-callgrind-history",
+            None,
+            None,
+            None,
+            False,
+        )
+
+        self.assertEqual(summary["backend"], "iai-callgrind")
+        self.assertEqual(summary["latest"]["backend"], "iai-callgrind")
+        self.assertIn("<!-- iai-callgrind-history:", markdown)
+
     maxDiff = None
 
     def test_callgrind_markdown_matches_snapshot(self) -> None:

@@ -6,9 +6,14 @@ import json
 import math
 import pathlib
 import re
+import sys
 from typing import Any
 
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
+from backend_names import normalize_backend  # noqa: E402
 DIRECTIVE_OPEN_RE = re.compile(r"^```rust-pr-bench[ \t]*$", re.MULTILINE)
 DIRECTIVE_BLOCK_RE = re.compile(
     r"^```rust-pr-bench[ \t]*\r?\n(?P<payload>.*?)^```[ \t]*$",
@@ -22,7 +27,6 @@ RULE_FIELDS = {
     "max_regression_pct",
     "reason",
 }
-BACKENDS = {"iai-callgrind", "criterion"}
 
 
 class RegressionOverrideError(ValueError):
@@ -122,11 +126,13 @@ def parse_directives(pr_body: str) -> list[dict[str, Any]]:
         }
         if "backend" in raw_rule:
             backend = _non_empty_string(raw_rule["backend"], "backend", index)
-            if backend not in BACKENDS:
+            try:
+                backend = normalize_backend(backend)
+            except ValueError as error:
                 raise RegressionOverrideError(
                     f"regression override rule {index} backend must be one of: "
-                    "criterion, iai-callgrind"
-                )
+                    "criterion, gungraun, iai-callgrind"
+                ) from error
             rule["backend"] = backend
         if "feature" in raw_rule:
             rule["feature"] = _non_empty_string(raw_rule["feature"], "feature", index)
@@ -246,7 +252,11 @@ def rule_matches_result(
 ) -> bool:
     if rule["benchmark"] != benchmark:
         return False
-    if rule.get("backend") is not None and rule["backend"] != backend:
+    normalized_backend = normalize_backend(backend)
+    if (
+        rule.get("backend") is not None
+        and normalize_backend(rule["backend"]) != normalized_backend
+    ):
         return False
     if rule.get("feature") is not None and rule["feature"] != feature:
         return False

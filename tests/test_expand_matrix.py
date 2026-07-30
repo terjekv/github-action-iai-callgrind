@@ -15,6 +15,10 @@ class ExpandMatrixTests(unittest.TestCase):
     def test_normalize_backend_selection_accepts_any(self) -> None:
         self.assertEqual(expand_matrix.normalize_backend_selection("any"), "all")
         self.assertEqual(expand_matrix.normalize_backend_selection("all"), "all")
+        self.assertEqual(
+            expand_matrix.normalize_backend_selection("gungraun"),
+            "iai-callgrind",
+        )
 
     def test_discover_benchmarks_routes_by_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -22,6 +26,10 @@ class ExpandMatrixTests(unittest.TestCase):
             benches = repo / "crate" / "benches"
             benches.mkdir(parents=True)
             (benches / "alpha_callgrind.rs").write_text("// callgrind\n", encoding="utf-8")
+            (benches / "alpha_gungraun.rs").write_text("// gungraun\n", encoding="utf-8")
+            (benches / "alpha_iai_callgrind.rs").write_text(
+                "// iai-callgrind\n", encoding="utf-8"
+            )
             (benches / "beta_criterion.rs").write_text("// criterion\n", encoding="utf-8")
             (benches / "shared.rs").write_text("// both\n", encoding="utf-8")
 
@@ -32,11 +40,20 @@ class ExpandMatrixTests(unittest.TestCase):
                 pairs,
                 {
                     ("alpha_callgrind", "iai-callgrind"),
+                    ("alpha_gungraun", "iai-callgrind"),
+                    ("alpha_iai_callgrind", "iai-callgrind"),
                     ("beta_criterion", "criterion"),
                     ("shared", "iai-callgrind"),
                     ("shared", "criterion"),
                 },
             )
+
+    def test_explicit_gungraun_spec_uses_v2_wire_backend(self) -> None:
+        expanded = expand_matrix.expand_benchmark_entry(
+            {"name": "new", "bench": "new", "backend": "gungraun"},
+            "iai-callgrind",
+        )
+        self.assertEqual(expanded[0]["backend"], "iai-callgrind")
 
     def test_discover_benchmarks_finds_workspace_members(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

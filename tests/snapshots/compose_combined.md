@@ -1,9 +1,9 @@
-# Benchmark Report
+# Rust PR Bench Report
 
 PR: #12 • Latest: 2026-02-27 20:30 UTC • Head: deadbee
 
 
-## Callgrind
+## Gungraun / IAI-Callgrind
 
 Regression threshold: **3.00%**
 

@@ -23,30 +23,73 @@ function findFirstMatchingComment(comments, markers) {
   });
 }
 
-async function loadHistory({ github, context, core, historyPath, historyKey, markers }) {
+function normalizeHistoryPayload(payload, canonicalBackend) {
+  if (!canonicalBackend || !payload || !Array.isArray(payload.history)) {
+    return payload;
+  }
+  const legacyBackends = new Set([
+    "gungraun",
+    "iai",
+    "iai-callgrind",
+    "callgrind",
+  ]);
+  return {
+    ...payload,
+    history: payload.history.map((entry) => {
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        !legacyBackends.has(String(entry.backend || "").toLowerCase())
+      ) {
+        return entry;
+      }
+      return { ...entry, backend: canonicalBackend };
+    }),
+  };
+}
+
+async function loadHistory({
+  github,
+  context,
+  core,
+  historyPath,
+  historyKey,
+  historyKeys,
+  markers,
+  canonicalBackend,
+}) {
   const issueNumber = context.payload?.pull_request?.number;
   if (!issueNumber) {
     return;
   }
 
   const comments = await listIssueComments(github, context, issueNumber);
-  const existing = findFirstMatchingComment(comments, markers);
-  if (!existing || !existing.body) {
-    return;
-  }
-
-  const escapedKey = historyKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const historyRegex = new RegExp(`<!-- ${escapedKey}: ([\\s\\S]*?) -->`);
-  const match = existing.body.match(historyRegex);
-  if (!match) {
-    return;
-  }
-
-  try {
-    const payload = JSON.parse(match[1]);
-    fs.writeFileSync(historyPath, JSON.stringify(payload));
-  } catch (error) {
-    logInfo(core, `Failed to parse history JSON: ${error}`);
+  const matchingComments = comments.filter(
+    (comment) =>
+      comment &&
+      comment.body &&
+      markers.some((marker) => comment.body.includes(marker)),
+  );
+  const keys = historyKeys || (historyKey ? [historyKey] : []);
+  for (const key of keys) {
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const historyRegex = new RegExp(`<!-- ${escapedKey}: ([\\s\\S]*?) -->`);
+    for (const existing of matchingComments) {
+      const match = existing.body.match(historyRegex);
+      if (!match) {
+        continue;
+      }
+      try {
+        const payload = normalizeHistoryPayload(
+          JSON.parse(match[1]),
+          canonicalBackend,
+        );
+        fs.writeFileSync(historyPath, JSON.stringify(payload));
+        return;
+      } catch (error) {
+        logInfo(core, `Failed to parse history JSON for ${key}: ${error}`);
+      }
+    }
   }
 }
 
@@ -161,7 +204,9 @@ async function upsertReport({
 }
 
 module.exports = {
+  findFirstMatchingComment,
   loadHistory,
   loadPullRequestMetadata,
+  normalizeHistoryPayload,
   upsertReport,
 };

@@ -19,6 +19,7 @@ from regression_overrides import (  # noqa: E402
     rule_accepts_delta,
     rule_matches_result,
 )
+from backend_names import normalize_backend  # noqa: E402
 
 
 def load_results(artifacts_dir: pathlib.Path) -> list[dict[str, Any]]:
@@ -41,19 +42,10 @@ def classify(delta_pct: float, threshold: float) -> tuple[str, bool]:
     return ("⚪ neutral", False)
 
 
-def normalize_backend(raw: str) -> str:
-    value = str(raw).strip().lower()
-    if value in {"iai", "iai-callgrind", "callgrind"}:
-        return "iai-callgrind"
-    if value in {"criterion"}:
-        return "criterion"
-    return "iai-callgrind"
-
-
 def backend_title(backend: str) -> str:
     if backend == "criterion":
-        return "Criterion Benchmark Report"
-    return "IAI-Callgrind Benchmark Report"
+        return "Rust PR Bench — Criterion Report"
+    return "Rust PR Bench — Gungraun / IAI-Callgrind Report"
 
 
 def build_run_meta_block(pr_number: int | None, run_at: str | None, head_sha: str | None) -> str:

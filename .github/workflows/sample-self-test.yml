@@ -23,18 +23,18 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
 
       - name: Run Python script tests
         run: |
-          python3 -m py_compile scripts/expand_matrix.py scripts/precompile_benchmarks.py scripts/regression_overrides.py scripts/render_report.py scripts/compose_combined_report.py scripts/run_pair.py
+          python3 -m py_compile scripts/backend_names.py scripts/expand_matrix.py scripts/precompile_benchmarks.py scripts/regression_overrides.py scripts/render_report.py scripts/compose_combined_report.py scripts/resolve_threshold.py scripts/run_pair.py scripts/runner_dispatch.py
           python3 -m unittest discover -s tests -v
 
       - name: Run JS helper tests
@@ -64,10 +64,27 @@ jobs:
       working_directory: examples/sample-rust-app
       benchmarks_json: >-
         [
-          {"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"iai-callgrind"}
+          {"name":"sample_iai_callgrind_compat_bench","bench":"sample_iai_callgrind_compat_bench","backend":"iai-callgrind"}
         ]
       feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
       regression_threshold_pct_iai_callgrind: 2
+      fail_on_regression: false
+      comment_mode: always
+
+  bench-sample-gungraun:
+    needs: clippy-sample
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      action_repository: ${{ github.event.pull_request.head.repo.full_name }}
+      action_ref: ${{ github.event.pull_request.head.sha }}
+      backend: gungraun
+      working_directory: examples/sample-rust-app
+      benchmarks_json: >-
+        [
+          {"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"}
+        ]
+      feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
+      regression_threshold_pct_gungraun: 2
       fail_on_regression: false
       comment_mode: always
 
@@ -100,16 +117,38 @@ jobs:
       working_directory: examples/sample-rust-app
       benchmarks_json: >-
         [
-          {"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"iai-callgrind"},
+          {"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"},
           {"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}
         ]
       feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
       criterion_cli_args: "--noplot --sample-size 30 --measurement-time 2"
       criterion_statistic: median
-      regression_threshold_pct_iai_callgrind: 2
+      regression_threshold_pct_gungraun: 2
       regression_threshold_pct_criterion: 10
       fail_on_regression: false
       comment_mode: always
+
+  bench-sample-mixed-migration:
+    needs: clippy-sample
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      action_repository: ${{ github.event.pull_request.head.repo.full_name }}
+      action_ref: ${{ github.event.pull_request.head.sha }}
+      backend: gungraun
+      working_directory: examples/sample-rust-app
+      benchmarks_json: >-
+        [
+          {
+            "name":"sample_callgrind_migration",
+            "bench":"sample_callgrind_bench",
+            "backend":"gungraun",
+            "base":{"bench":"sample_iai_callgrind_compat_bench"}
+          }
+        ]
+      feature_sets_json: '[{"name":"default","features":""}]'
+      regression_threshold_pct_gungraun: 100
+      fail_on_regression: false
+      comment_mode: never
 
   bench-sample-autodiscover-callgrind:
     needs: clippy-sample
