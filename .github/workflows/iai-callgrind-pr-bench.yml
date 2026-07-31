@@ -4,10 +4,12 @@ on:
   workflow_call:
     inputs:
       backend:
-        description: Benchmark backend to use (gungraun, iai-callgrind, criterion, or all).
+        description: >-
+          Benchmark backend to use (gungraun, criterion, or all). Legacy IAI-Callgrind
+          names remain supported through v3.
         required: false
         type: string
-        default: "iai-callgrind"
+        default: "gungraun"
       action_repository:
         description: Repository containing this workflow and scripts.
         required: false
@@ -79,14 +81,14 @@ on:
         default: 3
       regression_threshold_pct_iai_callgrind:
         description: >-
-          Compatibility name for the Gungraun / IAI-Callgrind threshold. Use -1 to
-          fall back to regression_threshold_pct.
+          Deprecated compatibility name for the Gungraun threshold. Use -1 to fall
+          back to regression_threshold_pct.
         required: false
         type: number
         default: -1
       regression_threshold_pct_gungraun:
         description: >-
-          Optional override threshold for the Gungraun / IAI-Callgrind backend.
+          Optional override threshold for the Gungraun backend.
           Use -1 to fall back to the legacy-specific or generic threshold.
         required: false
         type: number

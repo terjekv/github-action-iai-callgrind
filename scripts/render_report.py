@@ -19,7 +19,7 @@ from regression_overrides import (  # noqa: E402
     rule_accepts_delta,
     rule_matches_result,
 )
-from backend_names import normalize_backend  # noqa: E402
+from backend_names import GUNGRAUN_BACKEND, normalize_backend  # noqa: E402
 
 
 def load_results(artifacts_dir: pathlib.Path) -> list[dict[str, Any]]:
@@ -44,8 +44,8 @@ def classify(delta_pct: float, threshold: float) -> tuple[str, bool]:
 
 def backend_title(backend: str) -> str:
     if backend == "criterion":
-        return "Rust PR Bench — Criterion Report"
-    return "Rust PR Bench — Gungraun / IAI-Callgrind Report"
+        return "Criterion Benchmark Report"
+    return "Gungraun Benchmark Report"
 
 
 def build_run_meta_block(pr_number: int | None, run_at: str | None, head_sha: str | None) -> str:
@@ -655,7 +655,9 @@ def render_markdown(
         key = history_entry_key(item)
         if not key or key in seen:
             continue
-        new_history.append(item)
+        normalized_item = dict(item)
+        normalized_item["backend"] = item_backend
+        new_history.append(normalized_item)
         seen.add(key)
         if len(new_history) >= max_history:
             break
@@ -749,11 +751,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifacts-dir", required=True)
     parser.add_argument("--threshold", required=True, type=float)
-    parser.add_argument("--backend", default="iai-callgrind")
+    parser.add_argument("--backend", default=GUNGRAUN_BACKEND)
     parser.add_argument("--markdown-output", required=True)
     parser.add_argument("--summary-output", required=True)
     parser.add_argument("--history-input")
-    parser.add_argument("--history-key", default="iai-callgrind-history")
+    parser.add_argument("--history-key", default="gungraun-history")
     parser.add_argument("--template-path")
     parser.add_argument("--summary-template-path")
     parser.add_argument("--history-template-path")

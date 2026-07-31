@@ -19,7 +19,7 @@ class RunPairTests(unittest.TestCase):
         )
         self.assertEqual(
             run_pair.normalize_callgrind_metric_name(new),
-            "iai/sample/bench/callgrind.out",
+            "gungraun/sample/bench/callgrind.out",
         )
 
     def test_collects_old_and_new_path_fixtures_under_same_metric_key(self) -> None:

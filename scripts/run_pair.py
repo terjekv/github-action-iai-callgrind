@@ -14,7 +14,7 @@ SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from backend_names import normalize_backend  # noqa: E402
+from backend_names import GUNGRAUN_BACKEND, normalize_backend  # noqa: E402
 
 
 def parse_callgrind_summary(path: pathlib.Path) -> int | None:
@@ -53,7 +53,10 @@ def normalize_callgrind_metric_name(path: pathlib.Path) -> str:
     # callgrind filenames can include run-specific numeric suffixes (for example PID).
     # Strip trailing ".<digits>" and normalize the renamed output directory so an
     # iai-callgrind base can be paired with a Gungraun head.
-    parts = ["iai" if part in {"iai", "gungraun"} else part for part in path.parts]
+    parts = [
+        GUNGRAUN_BACKEND if part in {"iai", "gungraun"} else part
+        for part in path.parts
+    ]
     normalized = re.sub(r"\.\d+$", "", pathlib.PurePosixPath(*parts).as_posix())
     return normalized
 
@@ -333,7 +336,7 @@ def main() -> int:
     parser.add_argument("--move-target")
     parser.add_argument("--move-ambiguous", action="store_true")
     parser.add_argument("--move-candidates", default="[]")
-    parser.add_argument("--backend", default="iai-callgrind")
+    parser.add_argument("--backend", default=GUNGRAUN_BACKEND)
     parser.add_argument("--criterion-statistic", default="mean", choices=("mean", "median"))
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--base-sha", required=True)

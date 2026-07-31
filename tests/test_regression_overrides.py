@@ -190,7 +190,7 @@ class RegressionOverrideTests(unittest.TestCase):
             len(regression_overrides.parse_directives(directive(disjoint))), 2
         )
 
-    def test_gungraun_scope_normalizes_and_matches_v2_results(self) -> None:
+    def test_gungraun_scope_normalizes_and_matches_legacy_results(self) -> None:
         rules = regression_overrides.parse_directives(
             directive(
                 '[{"benchmark":"a","backend":"gungraun",'
@@ -198,7 +198,7 @@ class RegressionOverrideTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(rules[0]["backend"], "iai-callgrind")
+        self.assertEqual(rules[0]["backend"], "gungraun")
         self.assertTrue(
             regression_overrides.rule_matches_result(
                 rules[0], "gungraun", "default", "a"

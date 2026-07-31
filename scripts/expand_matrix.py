@@ -16,6 +16,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from backend_names import (  # noqa: E402
     BACKENDS,
+    GUNGRAUN_BACKEND,
     normalize_backend,
     normalize_backend_selection,
 )
@@ -36,7 +37,7 @@ def infer_name_backend(name: str) -> str | None:
     )
     has_criterion = "criterion" in lowered
     if has_callgrind and not has_criterion:
-        return "iai-callgrind"
+        return GUNGRAUN_BACKEND
     if has_criterion and not has_callgrind:
         return "criterion"
     return None
@@ -158,7 +159,10 @@ def discover_at_ref(
 
 
 def move_key(spec: dict[str, Any]) -> tuple[str, str]:
-    return (normalize_backend(str(spec.get("backend", "iai-callgrind"))), str(spec.get("bench", "")))
+    return (
+        normalize_backend(str(spec.get("backend", GUNGRAUN_BACKEND))),
+        str(spec.get("bench", "")),
+    )
 
 
 def benchmark_location(spec: dict[str, Any]) -> tuple[str, str, str]:
@@ -345,7 +349,7 @@ def make_matrix(
 ) -> dict[str, list[dict[str, Any]]]:
     include: list[dict[str, Any]] = []
     for bench in benchmarks:
-        backend = normalize_backend(str(bench.get("backend", "iai-callgrind")))
+        backend = normalize_backend(str(bench.get("backend", GUNGRAUN_BACKEND)))
         bench_name = str(bench.get("name") or bench.get("bench") or "benchmark")
         for feature_set in feature_sets:
             case_seed = f"{backend}|{bench_name}|{feature_set['name']}|{feature_set['features']}"
@@ -513,7 +517,7 @@ def main() -> int:
     parser.add_argument("--working-directory", default=".")
     parser.add_argument("--benchmarks-json", required=True)
     parser.add_argument("--feature-sets-json", required=True)
-    parser.add_argument("--backend", default="iai-callgrind")
+    parser.add_argument("--backend", default=GUNGRAUN_BACKEND)
     parser.add_argument("--criterion-cli-args", default="--noplot")
     parser.add_argument("--auto-discover", action="store_true")
     parser.add_argument("--auto-detect-moved-benchmarks", action="store_true")

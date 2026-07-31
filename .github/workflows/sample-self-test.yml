@@ -15,6 +15,9 @@ permissions:
   contents: read
   pull-requests: write
 
+env:
+  RUST_PR_BENCH_CANONICAL_BACKEND: gungraun
+
 jobs:
   script-tests:
     runs-on: ubuntu-latest
@@ -34,7 +37,7 @@ jobs:
 
       - name: Run Python script tests
         run: |
-          python3 -m py_compile scripts/backend_names.py scripts/expand_matrix.py scripts/precompile_benchmarks.py scripts/regression_overrides.py scripts/render_report.py scripts/compose_combined_report.py scripts/resolve_threshold.py scripts/run_pair.py scripts/runner_dispatch.py
+          python3 -m py_compile scripts/backend_names.py scripts/deprecation_warnings.py scripts/expand_matrix.py scripts/precompile_benchmarks.py scripts/regression_overrides.py scripts/render_report.py scripts/compose_combined_report.py scripts/resolve_threshold.py scripts/run_pair.py scripts/runner_dispatch.py
           python3 -m unittest discover -s tests -v
 
       - name: Run JS helper tests

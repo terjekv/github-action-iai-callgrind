@@ -17,7 +17,7 @@ class ExpandMatrixTests(unittest.TestCase):
         self.assertEqual(expand_matrix.normalize_backend_selection("all"), "all")
         self.assertEqual(
             expand_matrix.normalize_backend_selection("gungraun"),
-            "iai-callgrind",
+            "gungraun",
         )
 
     def test_discover_benchmarks_routes_by_name(self) -> None:
@@ -39,21 +39,21 @@ class ExpandMatrixTests(unittest.TestCase):
             self.assertEqual(
                 pairs,
                 {
-                    ("alpha_callgrind", "iai-callgrind"),
-                    ("alpha_gungraun", "iai-callgrind"),
-                    ("alpha_iai_callgrind", "iai-callgrind"),
+                    ("alpha_callgrind", "gungraun"),
+                    ("alpha_gungraun", "gungraun"),
+                    ("alpha_iai_callgrind", "gungraun"),
                     ("beta_criterion", "criterion"),
-                    ("shared", "iai-callgrind"),
+                    ("shared", "gungraun"),
                     ("shared", "criterion"),
                 },
             )
 
-    def test_explicit_gungraun_spec_uses_v2_wire_backend(self) -> None:
+    def test_explicit_legacy_spec_uses_v3_gungraun_backend(self) -> None:
         expanded = expand_matrix.expand_benchmark_entry(
-            {"name": "new", "bench": "new", "backend": "gungraun"},
-            "iai-callgrind",
+            {"name": "legacy", "bench": "legacy", "backend": "iai-callgrind"},
+            "gungraun",
         )
-        self.assertEqual(expanded[0]["backend"], "iai-callgrind")
+        self.assertEqual(expanded[0]["backend"], "gungraun")
 
     def test_discover_benchmarks_finds_workspace_members(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -71,7 +71,7 @@ class ExpandMatrixTests(unittest.TestCase):
                 )
                 (crate / "benches" / "shared_callgrind.rs").write_text("// bench\n", encoding="utf-8")
 
-            discovered = expand_matrix.discover_benchmarks(repo, ".", "iai-callgrind")
+            discovered = expand_matrix.discover_benchmarks(repo, ".", "gungraun")
 
             self.assertEqual(
                 {(item["name"], item["manifest_path"]) for item in discovered},
@@ -97,7 +97,7 @@ class ExpandMatrixTests(unittest.TestCase):
                 )
                 (crate / "benches" / "shared_callgrind.rs").write_text("// bench\n", encoding="utf-8")
 
-            discovered = expand_matrix.discover_benchmarks(repo, ".", "iai-callgrind")
+            discovered = expand_matrix.discover_benchmarks(repo, ".", "gungraun")
 
             self.assertEqual([item["name"] for item in discovered], ["crates/included/shared_callgrind"])
 
@@ -106,7 +106,7 @@ class ExpandMatrixTests(unittest.TestCase):
         feature_set = {"name": "default", "features": "", "no_default_features": False}
 
         callgrind_command = expand_matrix.build_command(
-            spec, feature_set, "", "iai-callgrind", "--noplot --sample-size 10"
+            spec, feature_set, "", "gungraun", "--noplot --sample-size 10"
         )
         criterion_command = expand_matrix.build_command(
             spec, feature_set, "", "criterion", "--noplot --sample-size 10"
@@ -174,8 +174,8 @@ class ExpandMatrixTests(unittest.TestCase):
     def test_build_matrix_groups_benchmarks_by_feature_and_revision(self) -> None:
         feature_sets = [{"name": "default", "features": "", "no_default_features": False}]
         benchmarks = [
-            {"name": "bench_a", "bench": "bench_a", "backend": "iai-callgrind"},
-            {"name": "bench_b", "bench": "bench_b", "backend": "iai-callgrind"},
+            {"name": "bench_a", "bench": "bench_a", "backend": "gungraun"},
+            {"name": "bench_b", "bench": "bench_b", "backend": "gungraun"},
         ]
 
         benchmark_matrix = expand_matrix.make_matrix(benchmarks, feature_sets, "", "--noplot")
@@ -198,7 +198,7 @@ class ExpandMatrixTests(unittest.TestCase):
     def test_build_matrix_shares_application_build_across_backends(self) -> None:
         feature_sets = [{"name": "default", "features": "", "no_default_features": False}]
         benchmarks = [
-            {"name": "callgrind", "bench": "callgrind", "backend": "iai-callgrind"},
+            {"name": "callgrind", "bench": "callgrind", "backend": "gungraun"},
             {"name": "criterion", "bench": "criterion", "backend": "criterion"},
         ]
 
@@ -213,7 +213,7 @@ class ExpandMatrixTests(unittest.TestCase):
             {
                 "name": "crates/new/parser_callgrind",
                 "bench": "parser_callgrind",
-                "backend": "iai-callgrind",
+                "backend": "gungraun",
                 "repo_crate": "crates/new",
                 "package_name": "parser",
             }
@@ -222,7 +222,7 @@ class ExpandMatrixTests(unittest.TestCase):
             {
                 "name": "crates/old/parser_callgrind",
                 "bench": "parser_callgrind",
-                "backend": "iai-callgrind",
+                "backend": "gungraun",
                 "repo_crate": "crates/old",
                 "package_name": "parser",
                 "manifest_path": "crates/old/Cargo.toml",
@@ -238,11 +238,11 @@ class ExpandMatrixTests(unittest.TestCase):
 
     def test_pair_moved_benchmarks_requires_source_to_be_absent_from_head(self) -> None:
         head = [
-            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/old"},
-            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/new"},
+            {"bench": "parser_callgrind", "backend": "gungraun", "repo_crate": "crates/old"},
+            {"bench": "parser_callgrind", "backend": "gungraun", "repo_crate": "crates/new"},
         ]
         base = [
-            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/old"}
+            {"bench": "parser_callgrind", "backend": "gungraun", "repo_crate": "crates/old"}
         ]
 
         paired = expand_matrix.pair_moved_benchmarks(head, base)
@@ -252,11 +252,11 @@ class ExpandMatrixTests(unittest.TestCase):
 
     def test_pair_moved_benchmarks_uses_a_base_source_only_once(self) -> None:
         head = [
-            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/new-a"},
-            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/new-b"},
+            {"bench": "parser_callgrind", "backend": "gungraun", "repo_crate": "crates/new-a"},
+            {"bench": "parser_callgrind", "backend": "gungraun", "repo_crate": "crates/new-b"},
         ]
         base = [
-            {"bench": "parser_callgrind", "backend": "iai-callgrind", "repo_crate": "crates/old"}
+            {"bench": "parser_callgrind", "backend": "gungraun", "repo_crate": "crates/old"}
         ]
 
         paired = expand_matrix.pair_moved_benchmarks(head, base)
@@ -271,7 +271,7 @@ class ExpandMatrixTests(unittest.TestCase):
             {
                 "name": "crates/new/parser_callgrind",
                 "bench": "parser_callgrind",
-                "backend": "iai-callgrind",
+                "backend": "gungraun",
                 "manifest_path": "crates/new/Cargo.toml",
                 "base": {
                     "bench": "parser_callgrind",
@@ -302,12 +302,12 @@ class ExpandMatrixTests(unittest.TestCase):
             {
                 "name": "crates/parser/parser_callgrind",
                 "bench": "parser_callgrind",
-                "backend": "iai-callgrind",
+                "backend": "gungraun",
                 "manifest_path": "crates/parser/Cargo.toml",
                 "base": {
                     "name": "parser_callgrind",
                     "bench": "parser_callgrind",
-                    "backend": "iai-callgrind",
+                    "backend": "gungraun",
                     "repo_crate": ".",
                 },
                 "moved": True,
@@ -392,7 +392,7 @@ class ExpandMatrixTests(unittest.TestCase):
                     "--feature-sets-json",
                     '[{"name":"default","features":""}]',
                     "--backend",
-                    "iai-callgrind",
+                    "gungraun",
                     "--auto-discover",
                     "--auto-detect-moved-benchmarks",
                     "--head-sha",
@@ -415,7 +415,7 @@ class ExpandMatrixTests(unittest.TestCase):
         spec = {"command": "cargo bench {features} {no_default_features_flag}"}
         feature_set = {"name": "feat", "features": "simd", "no_default_features": True}
 
-        command = expand_matrix.build_command(spec, feature_set, "", "iai-callgrind", "--noplot")
+        command = expand_matrix.build_command(spec, feature_set, "", "gungraun", "--noplot")
 
         self.assertEqual(command, "cargo bench simd --no-default-features")
 
