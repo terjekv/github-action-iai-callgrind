@@ -84,6 +84,8 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("scripts/gungraun-runner-dispatch", workflow)
         self.assertIn("taiki-e/install-action@v2", benchmark_block)
         self.assertNotIn("cargo install --locked iai-callgrind-runner", workflow)
+        self.assertIn("sudo timeout 120 apt-get", benchmark_block)
+        self.assertIn("Acquire::Retries=3", benchmark_block)
 
     def test_v3_defaults_to_and_serializes_gungraun(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(

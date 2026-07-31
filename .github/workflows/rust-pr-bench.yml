@@ -374,8 +374,16 @@ jobs:
         if: ${{ matrix.backend == 'gungraun' }}
         run: |
           if ! command -v valgrind >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y valgrind
+            sudo timeout 120 apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              update
+            sudo timeout 120 env DEBIAN_FRONTEND=noninteractive apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              install -y valgrind
           fi
 
       - name: Download precompiled head benchmark
