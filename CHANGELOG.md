@@ -7,6 +7,40 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-07-31
+
+### Added
+
+- Emit one GitHub Actions deprecation warning when a workflow call uses legacy backend
+  names or `regression_threshold_pct_iai_callgrind`.
+- Add v3 migration coverage for legacy benchmark specifications, regression overrides,
+  history payloads, comment markers, and exact old/new runner dispatch.
+
+### Changed
+
+- Make `gungraun` the default and canonical backend in matrices, result JSON, summaries,
+  artifacts, reports, history, and regression-override scopes.
+- Rename internal report and artifact paths from `iai-callgrind` to `gungraun`, and title
+  standalone reports “Gungraun Benchmark Report.”
+- Normalize `target/iai` and `target/gungraun` metric paths to the canonical `gungraun`
+  component.
+- Update all documentation and caller examples to use the Rust PR Bench v3 workflow.
+
+### Deprecated
+
+- Deprecate the `iai-callgrind`, `iai`, and `callgrind` backend aliases and
+  `regression_threshold_pct_iai_callgrind`. They remain supported through every v3
+  release and will not be removed before v4.
+
+### Fixed
+
+- Read `gungraun-history` before falling back to `iai-callgrind-history`, normalize old
+  history entries, and rewrite legacy PR comments using the Gungraun marker without
+  creating duplicates.
+- Pin helper-script checkouts to the exact reusable-workflow commit when `action_ref` is
+  empty, while preserving the v2 wire contract for immutable older workflows that
+  historically loaded helpers from the default branch.
+
 ## [2.3.0] - 2026-07-30
 
 ### Added

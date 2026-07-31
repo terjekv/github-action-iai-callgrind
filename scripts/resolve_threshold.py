@@ -6,7 +6,7 @@ import math
 UNSET = -1.0
 
 
-def resolve_callgrind_threshold(
+def resolve_gungraun_threshold(
     generic: float,
     gungraun_specific: float = UNSET,
     iai_callgrind_specific: float = UNSET,
@@ -28,7 +28,7 @@ def resolve_callgrind_threshold(
     old_value = values["regression_threshold_pct_iai_callgrind"]
     if new_value != UNSET and old_value != UNSET and new_value != old_value:
         raise ValueError(
-            "conflicting Callgrind thresholds: "
+            "conflicting Gungraun thresholds: "
             "regression_threshold_pct_gungraun "
             f"is {new_value:g}, but regression_threshold_pct_iai_callgrind "
             f"is {old_value:g}; set only one name or give both the same value"
@@ -40,6 +40,9 @@ def resolve_callgrind_threshold(
     return values["regression_threshold_pct"]
 
 
+resolve_callgrind_threshold = resolve_gungraun_threshold
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--generic", required=True, type=float)
@@ -48,7 +51,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        threshold = resolve_callgrind_threshold(
+        threshold = resolve_gungraun_threshold(
             args.generic,
             args.gungraun,
             args.iai_callgrind,

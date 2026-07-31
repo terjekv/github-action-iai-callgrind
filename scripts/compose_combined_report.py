@@ -48,7 +48,11 @@ def build_run_meta_block(pr_number: int | None, run_at: str | None, head_sha: st
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
-    parser.add_argument("--report-callgrind")
+    parser.add_argument(
+        "--report-gungraun",
+        "--report-callgrind",
+        dest="report_gungraun",
+    )
     parser.add_argument("--report-criterion")
     parser.add_argument("--template-path")
     parser.add_argument("--section-template-path")
@@ -61,13 +65,13 @@ def main() -> int:
     section_template = Template(
         load_template_text("report_combined_backend_section.md.tmpl", args.section_template_path)
     )
-    if args.report_callgrind:
-        path = pathlib.Path(args.report_callgrind)
+    if args.report_gungraun:
+        path = pathlib.Path(args.report_gungraun)
         if path.exists():
             backend_body = normalize_report_body(path)
             sections.append(
                 section_template.safe_substitute(
-                    backend_title="Gungraun / IAI-Callgrind",
+                    backend_title="Gungraun",
                     backend_body=backend_body,
                 ).strip()
             )

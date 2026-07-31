@@ -1,24 +1,53 @@
 #!/usr/bin/env python3
 import argparse
+import os
 
 
-# v2 keeps this value stable in matrices, result artifacts, summaries, and history.
-CALLGRIND_BACKEND = "iai-callgrind"
+V2_CALLGRIND_BACKEND = "iai-callgrind"
+V3_GUNGRAUN_BACKEND = "gungraun"
 CRITERION_BACKEND = "criterion"
-BACKENDS = (CALLGRIND_BACKEND, CRITERION_BACKEND)
-CALLGRIND_ALIASES = {"gungraun", "iai", "iai-callgrind", "callgrind"}
+LEGACY_GUNGRAUN_ALIASES = {"iai", "iai-callgrind", "callgrind"}
+GUNGRAUN_ALIASES = {V3_GUNGRAUN_BACKEND, *LEGACY_GUNGRAUN_ALIASES}
+
+
+def canonical_gungraun_backend() -> str:
+    override = os.environ.get("RUST_PR_BENCH_CANONICAL_BACKEND", "").strip().lower()
+    if override:
+        if override not in {V2_CALLGRIND_BACKEND, V3_GUNGRAUN_BACKEND}:
+            raise ValueError(
+                "RUST_PR_BENCH_CANONICAL_BACKEND must be 'gungraun' or "
+                "'iai-callgrind'"
+            )
+        return override
+
+    # Older immutable reusable-workflow tags historically checked helper scripts
+    # out from the default branch. Preserve their v2 wire contract when those
+    # workflows execute the current helpers. The v3 workflow sets the override
+    # above explicitly, while local script use defaults to current v3 behavior.
+    if os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true":
+        return V2_CALLGRIND_BACKEND
+    return V3_GUNGRAUN_BACKEND
+
+
+GUNGRAUN_BACKEND = canonical_gungraun_backend()
+BACKENDS = (GUNGRAUN_BACKEND, CRITERION_BACKEND)
 
 
 def normalize_backend(raw: str) -> str:
     value = str(raw).strip().lower()
-    if value in CALLGRIND_ALIASES:
-        return CALLGRIND_BACKEND
+    if value in GUNGRAUN_ALIASES:
+        return GUNGRAUN_BACKEND
     if value == CRITERION_BACKEND:
         return CRITERION_BACKEND
     raise ValueError(
         f"unsupported backend '{raw}' "
-        "(expected 'gungraun', 'iai-callgrind', or 'criterion')"
+        "(expected 'gungraun', 'criterion', or 'all'; legacy aliases "
+        "'iai-callgrind', 'iai', and 'callgrind' are also accepted)"
     )
+
+
+def is_legacy_backend(raw: str) -> bool:
+    return str(raw).strip().lower() in LEGACY_GUNGRAUN_ALIASES
 
 
 def normalize_backend_selection(raw: str) -> str:

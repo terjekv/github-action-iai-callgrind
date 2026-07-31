@@ -17,13 +17,13 @@ class ComposeCombinedReportTests(unittest.TestCase):
         callgrind_markdown, _ = render_report.render_markdown(
             callgrind_results(),
             3.0,
-            "iai-callgrind",
+            "gungraun",
             12,
             "deadbeefcafebabe",
             "2026-02-27 20:30 UTC",
             [],
             10,
-            "iai-callgrind-history",
+            "gungraun-history",
             None,
             None,
             None,
@@ -44,7 +44,7 @@ class ComposeCombinedReportTests(unittest.TestCase):
             None,
             True,
         )
-        callgrind_path = root / "callgrind.md"
+        callgrind_path = root / "gungraun.md"
         criterion_path = root / "criterion.md"
         callgrind_path.write_text(callgrind_markdown, encoding="utf-8")
         criterion_path.write_text(criterion_markdown, encoding="utf-8")
@@ -62,7 +62,7 @@ class ComposeCombinedReportTests(unittest.TestCase):
                     str(REPO_ROOT / "scripts" / "compose_combined_report.py"),
                     "--output",
                     str(output),
-                    "--report-callgrind",
+                    "--report-gungraun",
                     str(callgrind_path),
                     "--report-criterion",
                     str(criterion_path),
@@ -91,7 +91,7 @@ class ComposeCombinedReportTests(unittest.TestCase):
                     str(REPO_ROOT / "scripts" / "compose_combined_report.py"),
                     "--output",
                     str(output),
-                    "--report-callgrind",
+                    "--report-gungraun",
                     str(callgrind_path),
                 ],
                 check=True,
@@ -99,7 +99,7 @@ class ComposeCombinedReportTests(unittest.TestCase):
             )
 
             markdown = output.read_text(encoding="utf-8")
-            self.assertIn("## Gungraun / IAI-Callgrind", markdown)
+            self.assertIn("## Gungraun", markdown)
             self.assertNotIn("## Criterion", markdown)
 
     def test_no_backend_reports_fails_cleanly(self) -> None:

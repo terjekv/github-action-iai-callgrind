@@ -11,7 +11,7 @@ render_report = load_script_module("render_report", "scripts/render_report.py")
 def callgrind_results() -> list[dict]:
     return [
         {
-            "backend": "iai-callgrind",
+            "backend": "gungraun",
             "benchmark_name": "fast_path",
             "feature_name": "default",
             "base_total": 1000,
@@ -25,7 +25,7 @@ def callgrind_results() -> list[dict]:
             "metric_unit": "events",
         },
         {
-            "backend": "iai-callgrind",
+            "backend": "gungraun",
             "benchmark_name": "alt_path",
             "feature_name": "alt-impl",
             "base_total": 2000,
@@ -75,32 +75,32 @@ def criterion_results() -> list[dict]:
 
 
 class RenderReportTests(unittest.TestCase):
-    def test_gungraun_input_preserves_v2_serialized_backend_and_history_key(
-        self,
-    ) -> None:
+    def test_legacy_backend_and_history_serialize_as_gungraun(self) -> None:
         results = callgrind_results()
         for result in results:
-            result["backend"] = "gungraun"
+            result["backend"] = "iai-callgrind"
 
         markdown, summary = render_report.render_markdown(
             results,
             3.0,
-            "gungraun",
+            "iai-callgrind",
             None,
             "head",
             None,
-            [],
+            [{"backend": "iai", "commit": "old"}],
             10,
-            "iai-callgrind-history",
+            "gungraun-history",
             None,
             None,
             None,
             False,
         )
 
-        self.assertEqual(summary["backend"], "iai-callgrind")
-        self.assertEqual(summary["latest"]["backend"], "iai-callgrind")
-        self.assertIn("<!-- iai-callgrind-history:", markdown)
+        self.assertEqual(summary["backend"], "gungraun")
+        self.assertEqual(summary["latest"]["backend"], "gungraun")
+        self.assertEqual(summary["history"][1]["backend"], "gungraun")
+        self.assertIn("<!-- gungraun-history:", markdown)
+        self.assertNotIn("<!-- iai-callgrind-history:", markdown)
 
     maxDiff = None
 
@@ -108,13 +108,13 @@ class RenderReportTests(unittest.TestCase):
         markdown, summary = render_report.render_markdown(
             callgrind_results(),
             3.0,
-            "iai-callgrind",
+            "gungraun",
             12,
             "deadbeefcafebabe",
             "2026-02-27 20:30 UTC",
             [
                 {
-                    "backend": "iai-callgrind",
+                    "backend": "gungraun",
                     "commit": "abc1234",
                     "run_at": "2026-02-26 19:00 UTC",
                     "summary": {"improved": 1, "regressions": 0, "neutral": 0},
@@ -124,14 +124,14 @@ class RenderReportTests(unittest.TestCase):
                 }
             ],
             10,
-            "iai-callgrind-history",
+            "gungraun-history",
             None,
             None,
             None,
             False,
         )
 
-        self.assertEqual(markdown, read_snapshot("render_callgrind.md"))
+        self.assertEqual(markdown, read_snapshot("render_gungraun.md"))
         self.assertTrue(summary["has_regressions"])
         self.assertEqual(summary["latest"]["commit"], "deadbeefcafebabe")
 
@@ -170,7 +170,7 @@ class RenderReportTests(unittest.TestCase):
         markdown, summary = render_report.render_markdown(
             [],
             3.0,
-            "iai-callgrind",
+            "gungraun",
             7,
             "deadbeef",
             "2026-02-27 20:22 UTC",
@@ -186,7 +186,7 @@ class RenderReportTests(unittest.TestCase):
                 }
             ],
             10,
-            "iai-callgrind-history",
+            "gungraun-history",
             None,
             None,
             None,
@@ -194,7 +194,8 @@ class RenderReportTests(unittest.TestCase):
         )
 
         self.assertEqual(markdown, read_snapshot("render_no_results.md"))
-        self.assertIn("<!-- iai-callgrind-history:", markdown)
+        self.assertIn("<!-- gungraun-history:", markdown)
+        self.assertEqual(summary["history"][0]["backend"], "gungraun")
         self.assertEqual(summary["history"][0]["commit"], "abc1234")
 
     def test_missing_entries_are_listed(self) -> None:
@@ -237,7 +238,7 @@ class RenderReportTests(unittest.TestCase):
     def test_moved_and_error_entries_are_listed(self) -> None:
         results = [
             {
-                "backend": "iai-callgrind",
+                "backend": "gungraun",
                 "benchmark_name": "crates/new/parser_callgrind",
                 "feature_name": "default",
                 "base_total": 0,
@@ -261,13 +262,13 @@ class RenderReportTests(unittest.TestCase):
         markdown, _ = render_report.render_markdown(
             results,
             3.0,
-            "iai-callgrind",
+            "gungraun",
             None,
             None,
             None,
             [],
             10,
-            "iai-callgrind-history",
+            "gungraun-history",
             None,
             None,
             None,
@@ -281,7 +282,7 @@ class RenderReportTests(unittest.TestCase):
 
     def test_failed_entries_are_excluded_from_summary_and_history_aggregates(self) -> None:
         failed = {
-            "backend": "iai-callgrind",
+            "backend": "gungraun",
             "benchmark_name": "failed",
             "feature_name": "default",
             "base_total": 100,
@@ -299,8 +300,8 @@ class RenderReportTests(unittest.TestCase):
         successful["feature_name"] = "default"
 
         _, summary = render_report.render_markdown(
-            [failed, successful], 3.0, "iai-callgrind", None, "head", None, [], 10,
-            "iai-callgrind-history", None, None, None, False,
+            [failed, successful], 3.0, "gungraun", None, "head", None, [], 10,
+            "gungraun-history", None, None, None, False,
         )
 
         latest = summary["latest"]
@@ -319,7 +320,7 @@ class RenderReportTests(unittest.TestCase):
             "rules": [
                 {
                     "benchmark": "fast_path",
-                    "backend": "iai-callgrind",
+                    "backend": "gungraun",
                     "feature": "default",
                     "max_regression_pct": 15.0,
                     "reason": "Constant-time security fix",
@@ -328,8 +329,8 @@ class RenderReportTests(unittest.TestCase):
         }
 
         markdown, summary = render_report.render_markdown(
-            callgrind_results(), 3.0, "iai-callgrind", None, "head", None, [], 10,
-            "iai-callgrind-history", None, None, None, False, overrides,
+            callgrind_results(), 3.0, "gungraun", None, "head", None, [], 10,
+            "gungraun-history", None, None, None, False, overrides,
         )
 
         self.assertTrue(summary["has_regressions"])
@@ -356,8 +357,8 @@ class RenderReportTests(unittest.TestCase):
         }
 
         markdown, summary = render_report.render_markdown(
-            callgrind_results(), 3.0, "iai-callgrind", None, None, None, [], 10,
-            "iai-callgrind-history", None, None, None, False, overrides,
+            callgrind_results(), 3.0, "gungraun", None, None, None, [], 10,
+            "gungraun-history", None, None, None, False, overrides,
         )
 
         self.assertTrue(summary["has_regressions"])
@@ -380,12 +381,12 @@ class RenderReportTests(unittest.TestCase):
         approved = {**unapproved, "approved": True}
 
         unapproved_markdown, unapproved_summary = render_report.render_markdown(
-            callgrind_results(), 3.0, "iai-callgrind", None, None, None, [], 10,
-            "iai-callgrind-history", None, None, None, False, unapproved,
+            callgrind_results(), 3.0, "gungraun", None, None, None, [], 10,
+            "gungraun-history", None, None, None, False, unapproved,
         )
         approved_markdown, _ = render_report.render_markdown(
-            callgrind_results(), 3.0, "iai-callgrind", None, None, None, [], 10,
-            "iai-callgrind-history", None, None, None, False, approved,
+            callgrind_results(), 3.0, "gungraun", None, None, None, [], 10,
+            "gungraun-history", None, None, None, False, approved,
         )
 
         self.assertTrue(unapproved_summary["has_unaccepted_regressions"])
@@ -403,13 +404,13 @@ class RenderReportTests(unittest.TestCase):
             markdown, _ = render_report.render_markdown(
                 callgrind_results(),
                 3.0,
-                "iai-callgrind",
+                "gungraun",
                 None,
                 None,
                 None,
                 [],
                 10,
-                "iai-callgrind-history",
+                "gungraun-history",
                 None,
                 str(summary_template),
                 str(history_template),

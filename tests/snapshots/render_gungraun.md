@@ -1,4 +1,4 @@
-## Rust PR Bench — Gungraun / IAI-Callgrind Report
+## Gungraun Benchmark Report
 
 Regression threshold: **3.00%**
 PR: #12 • Latest: 2026-02-27 20:30 UTC • Head: deadbee
@@ -62,4 +62,4 @@ Metric-level breakdowns:
 | abc1234 | 2026-02-26 19:00 UTC | 1 improved / 0 reg / 0 neutral | -5.00% | -5.00% | no |
 
 
-<!-- iai-callgrind-history: {"history":[{"backend":"iai-callgrind","commit":"deadbeefcafebabe","run_at":"2026-02-27 20:30 UTC","pr_number":12,"summary":{"improved":1,"regressions":1,"accepted_regressions":0,"neutral":0},"avg_bench_delta_pct":0.0,"avg_metric_delta_pct":0.0,"has_regressions":true,"has_unaccepted_regressions":true},{"backend":"iai-callgrind","commit":"abc1234","run_at":"2026-02-26 19:00 UTC","summary":{"improved":1,"regressions":0,"neutral":0},"avg_bench_delta_pct":-5.0,"avg_metric_delta_pct":-5.0,"has_regressions":false}]} -->
+<!-- gungraun-history: {"history":[{"backend":"gungraun","commit":"deadbeefcafebabe","run_at":"2026-02-27 20:30 UTC","pr_number":12,"summary":{"improved":1,"regressions":1,"accepted_regressions":0,"neutral":0},"avg_bench_delta_pct":0.0,"avg_metric_delta_pct":0.0,"has_regressions":true,"has_unaccepted_regressions":true},{"backend":"gungraun","commit":"abc1234","run_at":"2026-02-26 19:00 UTC","summary":{"improved":1,"regressions":0,"neutral":0},"avg_bench_delta_pct":-5.0,"avg_metric_delta_pct":-5.0,"has_regressions":false}]} -->

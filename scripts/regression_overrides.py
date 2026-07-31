@@ -131,7 +131,7 @@ def parse_directives(pr_body: str) -> list[dict[str, Any]]:
             except ValueError as error:
                 raise RegressionOverrideError(
                     f"regression override rule {index} backend must be one of: "
-                    "criterion, gungraun, iai-callgrind"
+                    "criterion or gungraun (legacy IAI-Callgrind aliases are also accepted)"
                 ) from error
             rule["backend"] = backend
         if "feature" in raw_rule:

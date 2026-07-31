@@ -172,7 +172,7 @@ class RunnerDispatchTests(unittest.TestCase):
             new = self.dispatch(root, "gungraun", "0.16.1", env)
 
             self.assertNotEqual(old.returncode, 0)
-            self.assertIn("supports library version 0.16.1", old.stderr)
+            self.assertIn("supports the legacy library version 0.16.1", old.stderr)
             self.assertNotEqual(new.returncode, 0)
             self.assertIn("beginning at 0.17.0", new.stderr)
             self.assertFalse((root / "installers.log").exists())

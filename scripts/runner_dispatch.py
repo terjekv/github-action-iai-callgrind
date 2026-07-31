@@ -36,7 +36,7 @@ def validate_version(package: str, version: str) -> str:
     prerelease = match.group(4)
     if package == "iai-callgrind" and (core != (0, 16, 1) or prerelease):
         raise DispatchError(
-            "iai-callgrind: this v2 compatibility bridge supports library version "
+            "iai-callgrind: Rust PR Bench supports the legacy library version "
             f"0.16.1, but the benchmark requested {version}; pin iai-callgrind to "
             "0.16.1 or migrate the benchmark to gungraun >= 0.17.0"
         )

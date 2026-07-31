@@ -4,10 +4,12 @@ on:
   workflow_call:
     inputs:
       backend:
-        description: Benchmark backend to use (gungraun, iai-callgrind, criterion, or all).
+        description: >-
+          Benchmark backend to use (gungraun, criterion, or all). Legacy IAI-Callgrind
+          names remain supported through v3.
         required: false
         type: string
-        default: "iai-callgrind"
+        default: "gungraun"
       action_repository:
         description: Repository containing this workflow and scripts.
         required: false
@@ -79,14 +81,14 @@ on:
         default: 3
       regression_threshold_pct_iai_callgrind:
         description: >-
-          Compatibility name for the Gungraun / IAI-Callgrind threshold. Use -1 to
-          fall back to regression_threshold_pct.
+          Deprecated compatibility name for the Gungraun threshold. Use -1 to fall
+          back to regression_threshold_pct.
         required: false
         type: number
         default: -1
       regression_threshold_pct_gungraun:
         description: >-
-          Optional override threshold for the Gungraun / IAI-Callgrind backend.
+          Optional override threshold for the Gungraun backend.
           Use -1 to fall back to the legacy-specific or generic threshold.
         required: false
         type: number
@@ -127,6 +129,9 @@ permissions:
   contents: read
   pull-requests: write
 
+env:
+  RUST_PR_BENCH_CANONICAL_BACKEND: gungraun
+
 jobs:
   prepare-matrix:
     runs-on: ubuntu-latest
@@ -149,7 +154,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Normalize backend name
@@ -159,6 +164,17 @@ jobs:
         run: |
           BACKEND="$(python3 action-src/scripts/backend_names.py --selection "$BACKEND_INPUT")"
           echo "value=$BACKEND" >> "$GITHUB_OUTPUT"
+
+      - name: Warn about deprecated v3 inputs
+        env:
+          BACKEND_INPUT: ${{ inputs.backend }}
+          BENCHMARKS_JSON_INPUT: ${{ inputs.benchmarks_json }}
+          LEGACY_THRESHOLD_INPUT: ${{ inputs.regression_threshold_pct_iai_callgrind }}
+        run: |
+          python3 action-src/scripts/deprecation_warnings.py \
+            --backend "$BACKEND_INPUT" \
+            --benchmarks-json "$BENCHMARKS_JSON_INPUT" \
+            --iai-callgrind-threshold "$LEGACY_THRESHOLD_INPUT"
 
       - name: Checkout caller repository
         uses: actions/checkout@v7
@@ -243,7 +259,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Checkout caller repository
@@ -307,7 +323,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Checkout caller repository
@@ -343,19 +359,19 @@ jobs:
           toolchain: ${{ inputs.toolchain }}
 
       - name: Install cargo-binstall for exact-version runner dispatch
-        if: ${{ matrix.backend == 'iai-callgrind' }}
+        if: ${{ matrix.backend == 'gungraun' }}
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-binstall
 
       - name: Validate exact-version runner dispatchers
-        if: ${{ matrix.backend == 'iai-callgrind' }}
+        if: ${{ matrix.backend == 'gungraun' }}
         run: |
           test -x "$IAI_CALLGRIND_RUNNER"
           test -x "$GUNGRAUN_RUNNER"
 
       - name: Ensure valgrind is available
-        if: ${{ matrix.backend == 'iai-callgrind' }}
+        if: ${{ matrix.backend == 'gungraun' }}
         run: |
           if ! command -v valgrind >/dev/null 2>&1; then
             sudo apt-get update
@@ -468,7 +484,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Download benchmark artifacts
@@ -485,7 +501,7 @@ jobs:
           import shutil
 
           source = pathlib.Path("artifacts")
-          for backend in ("iai-callgrind", "criterion"):
+          for backend in ("gungraun", "criterion"):
               target = pathlib.Path(f"artifacts-{backend}")
               if target.exists():
                   shutil.rmtree(target)
@@ -497,7 +513,7 @@ jobs:
               except Exception:
                   continue
               backend = payload.get("backend")
-              if backend not in {"iai-callgrind", "criterion"}:
+              if backend not in {"gungraun", "criterion"}:
                   continue
               rel = path.relative_to(source)
               dest = pathlib.Path(f"artifacts-{backend}") / rel
@@ -505,13 +521,13 @@ jobs:
               shutil.copy2(path, dest)
           PY
 
-      - name: Load Gungraun / IAI-Callgrind PR history
+      - name: Load Gungraun PR history
         if: github.event_name == 'pull_request' && needs.prepare-matrix.outputs.normalized_backend != 'criterion'
         uses: actions/github-script@v9
         env:
-          HISTORY_PATH: history-callgrind.json
-          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- iai-callgrind-bench -->"]'
-          HISTORY_KEY: "iai-callgrind-history"
+          HISTORY_PATH: history-gungraun.json
+          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- gungraun-bench -->","<!-- iai-callgrind-bench -->"]'
+          HISTORY_KEYS_JSON: '["gungraun-history","iai-callgrind-history"]'
         with:
           script: |
             const helper = require('./action-src/scripts/github_pr_comment');
@@ -520,12 +536,13 @@ jobs:
               context,
               core,
               historyPath: process.env.HISTORY_PATH,
-              historyKey: process.env.HISTORY_KEY,
+              historyKeys: JSON.parse(process.env.HISTORY_KEYS_JSON),
               markers: JSON.parse(process.env.MARKERS_JSON),
+              canonicalBackend: "gungraun",
             });
 
       - name: Load Criterion PR history
-        if: github.event_name == 'pull_request' && needs.prepare-matrix.outputs.normalized_backend != 'iai-callgrind'
+        if: github.event_name == 'pull_request' && needs.prepare-matrix.outputs.normalized_backend != 'gungraun'
         uses: actions/github-script@v9
         env:
           HISTORY_PATH: history-criterion.json
@@ -572,8 +589,8 @@ jobs:
             --approval-label "$REGRESSION_OVERRIDE_LABEL" \
             --output regression-overrides.json
 
-      - name: Resolve Gungraun / IAI-Callgrind regression threshold
-        id: threshold_callgrind
+      - name: Resolve Gungraun regression threshold
+        id: threshold_gungraun
         run: |
           THRESHOLD="$(
             python3 action-src/scripts/resolve_threshold.py \
@@ -599,14 +616,14 @@ jobs:
             echo "pr_number=$PR_NUMBER"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Render Gungraun / IAI-Callgrind report
-        id: render_callgrind
+      - name: Render Gungraun report
+        id: render_gungraun
         if: needs.prepare-matrix.outputs.normalized_backend != 'criterion'
         run: |
-          THRESHOLD='${{ steps.threshold_callgrind.outputs.value }}'
+          THRESHOLD='${{ steps.threshold_gungraun.outputs.value }}'
           HISTORY_ARG=()
-          if [ -f history-callgrind.json ]; then
-            HISTORY_ARG=(--history-input history-callgrind.json)
+          if [ -f history-gungraun.json ]; then
+            HISTORY_ARG=(--history-input history-gungraun.json)
           fi
           PR_ARG=()
           if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
@@ -618,12 +635,12 @@ jobs:
           fi
 
           python3 action-src/scripts/render_report.py \
-            --artifacts-dir artifacts-iai-callgrind \
+            --artifacts-dir artifacts-gungraun \
             --threshold "$THRESHOLD" \
-            --backend "iai-callgrind" \
-            --markdown-output report-callgrind.md \
-            --summary-output summary-callgrind.json \
-            --history-key "iai-callgrind-history" \
+            --backend "gungraun" \
+            --markdown-output report-gungraun.md \
+            --summary-output summary-gungraun.json \
+            --history-key "gungraun-history" \
             --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
             --run-at "${{ steps.report_meta.outputs.run_at }}" \
             --max-history 10 \
@@ -633,14 +650,14 @@ jobs:
             "${OMIT_RUN_META_ARG[@]}"
 
           if [ "${{ needs.prepare-matrix.outputs.normalized_backend }}" != "all" ]; then
-            cat report-callgrind.md >> "$GITHUB_STEP_SUMMARY"
+            cat report-gungraun.md >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
-          echo "has_unaccepted_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_unaccepted_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+          echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-gungraun.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+          echo "has_unaccepted_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-gungraun.json"))["has_unaccepted_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
 
       - name: Render Criterion report
         id: render_criterion
-        if: needs.prepare-matrix.outputs.normalized_backend != 'iai-callgrind'
+        if: needs.prepare-matrix.outputs.normalized_backend != 'gungraun'
         run: |
           THRESHOLD='${{ inputs.regression_threshold_pct }}'
           if [ '${{ inputs.regression_threshold_pct_criterion }}' != '-1' ]; then
@@ -690,7 +707,7 @@ jobs:
 
           python3 action-src/scripts/compose_combined_report.py \
             --output report.md \
-            --report-callgrind report-callgrind.md \
+            --report-gungraun report-gungraun.md \
             --report-criterion report-criterion.md \
             --run-at "${{ steps.report_meta.outputs.run_at }}" \
             --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
@@ -703,10 +720,10 @@ jobs:
         run: |
           HAS_REGRESSIONS=false
           HAS_UNACCEPTED_REGRESSIONS=false
-          if [ -f summary-callgrind.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_regressions"]).lower())')" = "true" ]; then
+          if [ -f summary-gungraun.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-gungraun.json"))["has_regressions"]).lower())')" = "true" ]; then
             HAS_REGRESSIONS=true
           fi
-          if [ -f summary-callgrind.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-callgrind.json"))["has_unaccepted_regressions"]).lower())')" = "true" ]; then
+          if [ -f summary-gungraun.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-gungraun.json"))["has_unaccepted_regressions"]).lower())')" = "true" ]; then
             HAS_UNACCEPTED_REGRESSIONS=true
           fi
           if [ -f summary-criterion.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_regressions"]).lower())')" = "true" ]; then
@@ -732,18 +749,18 @@ jobs:
             summary-*.json
             regression-overrides.json
 
-      - name: Upsert Gungraun / IAI-Callgrind PR comment
+      - name: Upsert Gungraun PR comment
         if: >-
           github.event_name == 'pull_request' &&
           needs.prepare-matrix.outputs.normalized_backend != 'all' &&
           needs.prepare-matrix.outputs.normalized_backend != 'criterion' &&
           (inputs.comment_mode == 'always' ||
-          (inputs.comment_mode == 'on-regression' && steps.render_callgrind.outputs.has_regressions == 'true'))
+          (inputs.comment_mode == 'on-regression' && steps.render_gungraun.outputs.has_regressions == 'true'))
         uses: actions/github-script@v9
         env:
-          REPORT_PATH: report-callgrind.md
-          PRIMARY_MARKER: "<!-- iai-callgrind-bench -->"
-          MARKERS_JSON: '["<!-- iai-callgrind-bench -->"]'
+          REPORT_PATH: report-gungraun.md
+          PRIMARY_MARKER: "<!-- gungraun-bench -->"
+          MARKERS_JSON: '["<!-- gungraun-bench -->","<!-- iai-callgrind-bench -->"]'
         with:
           script: |
             const helper = require('./action-src/scripts/github_pr_comment');
@@ -760,7 +777,7 @@ jobs:
         if: >-
           github.event_name == 'pull_request' &&
           needs.prepare-matrix.outputs.normalized_backend != 'all' &&
-          needs.prepare-matrix.outputs.normalized_backend != 'iai-callgrind' &&
+          needs.prepare-matrix.outputs.normalized_backend != 'gungraun' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_criterion.outputs.has_regressions == 'true'))
         uses: actions/github-script@v9
@@ -790,7 +807,7 @@ jobs:
         env:
           REPORT_PATH: report.md
           PRIMARY_MARKER: "<!-- rust-pr-bench -->"
-          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- iai-callgrind-bench -->","<!-- criterion-bench -->"]'
+          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- gungraun-bench -->","<!-- iai-callgrind-bench -->","<!-- criterion-bench -->"]'
         with:
           script: |
             const helper = require('./action-src/scripts/github_pr_comment');

@@ -85,18 +85,57 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("taiki-e/install-action@v2", benchmark_block)
         self.assertNotIn("cargo install --locked iai-callgrind-runner", workflow)
 
-    def test_v2_accepts_gungraun_while_preserving_default_and_wire_names(self) -> None:
+    def test_v3_defaults_to_and_serializes_gungraun(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
             encoding="utf-8"
         )
         report_block = extract_job_block(workflow, "report")
 
-        self.assertIn("default: \"iai-callgrind\"", workflow)
+        self.assertIn("default: \"gungraun\"", workflow)
         self.assertIn("scripts/backend_names.py --selection", workflow)
         self.assertIn("normalized_backend:", workflow)
-        self.assertIn("artifacts-iai-callgrind", report_block)
-        self.assertIn('HISTORY_KEY: "iai-callgrind-history"', report_block)
-        self.assertIn('PRIMARY_MARKER: "<!-- iai-callgrind-bench -->"', report_block)
+        self.assertIn("artifacts-gungraun", report_block)
+        self.assertIn('--backend "gungraun"', report_block)
+        self.assertIn('--history-key "gungraun-history"', report_block)
+        self.assertIn('PRIMARY_MARKER: "<!-- gungraun-bench -->"', report_block)
+        self.assertIn("RUST_PR_BENCH_CANONICAL_BACKEND: gungraun", workflow)
+
+    def test_v3_pins_helper_checkouts_to_the_called_workflow_commit(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
+            encoding="utf-8"
+        )
+
+        fallback = (
+            "ref: ${{ inputs.action_ref != '' && inputs.action_ref || "
+            "job.workflow_sha }}"
+        )
+        self.assertEqual(workflow.count(fallback), 4)
+        self.assertNotIn("ref: ${{ inputs.action_ref }}", workflow)
+
+    def test_v3_warns_once_for_legacy_workflow_inputs(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
+            encoding="utf-8"
+        )
+        prepare_block = extract_job_block(workflow, "prepare-matrix")
+
+        self.assertEqual(prepare_block.count("scripts/deprecation_warnings.py"), 1)
+        self.assertIn("--iai-callgrind-threshold", prepare_block)
+
+    def test_v3_migrates_legacy_history_and_comment_markers_in_place(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
+            encoding="utf-8"
+        )
+        report_block = extract_job_block(workflow, "report")
+
+        self.assertIn(
+            'HISTORY_KEYS_JSON: \'["gungraun-history","iai-callgrind-history"]\'',
+            report_block,
+        )
+        self.assertIn('canonicalBackend: "gungraun"', report_block)
+        self.assertIn(
+            'MARKERS_JSON: \'["<!-- gungraun-bench -->","<!-- iai-callgrind-bench -->"]\'',
+            report_block,
+        )
 
     def test_new_and_legacy_callgrind_thresholds_are_resolved_together(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "rust-pr-bench.yml").read_text(
@@ -151,6 +190,7 @@ class WorkflowContractTests(unittest.TestCase):
             REPO_ROOT / ".github" / "workflows" / "iai-callgrind-pr-bench.yml"
         ).read_text(encoding="utf-8")
 
+        self.assertIn('default: "gungraun"', wrapper)
         self.assertIn("regression_override_label:", wrapper)
         self.assertIn(
             "regression_override_label: ${{ inputs.regression_override_label }}", wrapper
