@@ -10,6 +10,9 @@ the old `.github/workflows/iai-callgrind-pr-bench.yml` path is a supported compa
 This is intentional because [GitHub Actions does not follow repository-rename redirects in
 `uses:` references](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations).
 
+Upgrading from v2? Follow the [v2 to v3 migration guide](#migrating-consumers-from-v2-to-v3),
+including the staged v2.3 bridge and the machine-readable identifier changes.
+
 ## What this provides
 
 - Runs configured benchmark targets for a matrix of feature sets.
@@ -472,13 +475,23 @@ This repository includes a sample Rust project at `examples/sample-rust-app`.
   then validates old-only, new-only, mixed old/new, combined `backend: all`, and autodiscovery
   modes against the sample fixture on pull requests.
 
-## Migrating consumers to Gungraun
+## Migrating consumers from v2 to v3
 
 For the safest history-preserving migration, move callers to the v2.3 bridge before changing
 their benchmark crate. Callers pinned to `v1` or an immutable SHA must update explicitly;
 floating `v1` and `v2` remain on their compatible implementations.
 
-The consumer migration is mechanical:
+### Quick migration path
+
+1. Change the caller workflow to `@v2.3` while it still uses IAI-Callgrind, then confirm a
+   successful benchmark comparison.
+2. While staying on `@v2.3`, migrate the benchmark crate to Gungraun and run a PR comparison
+   with the base revision still on IAI-Callgrind. Keep the existing Cargo benchmark target name
+   during this step so base/head metrics and PR history continue to pair.
+3. Change the caller workflow to `@v3`, use the canonical Gungraun input names, and update any
+   downstream automation that reads backend-specific artifacts or JSON.
+
+The code and configuration changes are mechanical:
 
 1. Rename the Cargo dependency from `iai-callgrind` to `gungraun = "0.19.4"`.
 2. Replace Rust imports from `iai_callgrind::...` with `gungraun::...`.
@@ -489,6 +502,65 @@ The consumer migration is mechanical:
 5. Initially retain benchmark target filenames. Stable target names preserve base/head metric
    pairing and PR history while the dependency changes.
 6. After a successful mixed base/head comparison on v2.3, change the workflow ref to `@v3`.
+
+Before:
+
+```toml
+[dev-dependencies]
+iai-callgrind = "0.16.1"
+```
+
+```rust
+use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+```
+
+```yaml
+jobs:
+  bench:
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v2.3
+    with:
+      backend: iai-callgrind
+      regression_threshold_pct_iai_callgrind: 3
+```
+
+After the mixed comparison succeeds:
+
+```toml
+[dev-dependencies]
+gungraun = "0.19.4"
+```
+
+```rust
+use gungraun::{library_benchmark, library_benchmark_group, main};
+```
+
+```yaml
+jobs:
+  bench:
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v3
+    with:
+      backend: gungraun
+      regression_threshold_pct_gungraun: 3
+```
+
+Regenerate the consumer's Cargo lockfile and compile its benchmark targets after renaming the
+dependency. Consumers with custom runner setup must also install a matching
+`gungraun-runner` and expose it through `GUNGRAUN_RUNNER`; the reusable workflow handles this
+automatically.
+
+### Compatibility and machine-readable changes
+
+| Interface | v3 behavior | Consumer action |
+| --- | --- | --- |
+| Repository and canonical workflow | Remain `terjekv/github-action-iai-callgrind` and `.github/workflows/rust-pr-bench.yml` | No rename required |
+| Compatibility workflow | `.github/workflows/iai-callgrind-pr-bench.yml` remains supported | Moving to the canonical path is optional |
+| Workflow outputs | `has_regressions` and `has_unaccepted_regressions` are unchanged | No output wiring change required |
+| Default backend | Calls that omit `backend` now select `gungraun` | Set `backend` explicitly if the default matters |
+| Backend and threshold inputs | `gungraun` and `regression_threshold_pct_gungraun` are canonical | Rename legacy inputs to avoid deprecation warnings |
+| Result JSON and summaries | Callgrind-family `backend` values serialize as `gungraun` | Update parsers that expect `iai-callgrind` |
+| Backend-specific report data | Uses `summary-gungraun.json`, `gungraun-history`, and `<!-- gungraun-bench -->`; backend-specific artifact/report names use `gungraun` | Update external artifact, history, or comment tooling |
+| Existing PR history and comments | Old history is normalized and the old comment is updated in place with the new marker | No manual cleanup or duplicate-comment removal required |
+| Legacy names | `iai-callgrind`, `iai`, `callgrind`, and `regression_threshold_pct_iai_callgrind` still work but emit one warning | Migrate during v3; removal is no earlier than v4 |
 
 Version 3 defaults to and serializes `gungraun`, migrates old history/comment markers in place,
 and keeps `iai-callgrind`, `iai`, and `callgrind` as deprecated aliases. Those aliases remain
