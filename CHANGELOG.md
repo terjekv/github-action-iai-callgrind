@@ -14,6 +14,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 - Expand the v2-to-v3 migration guide with a staged upgrade path, before/after examples,
   and an explicit list of stable interfaces and machine-readable identifier changes.
 
+### Fixed
+
+- Allow more time for Valgrind package downloads in CI and skip optional debugger packages.
+
 ## [3.0.0] - 2026-07-31
 
 ### Added
