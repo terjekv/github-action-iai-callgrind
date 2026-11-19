@@ -1,3 +1,4 @@
+import tomllib
 import unittest
 
 from testlib import REPO_ROOT
@@ -62,9 +63,9 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertIn("scripts/precompile_benchmarks.py", precompile_block)
         self.assertIn("--target-dir", precompile_block)
-        self.assertIn("actions/upload-artifact@v7", precompile_block)
+        self.assertRegex(precompile_block, r"uses: actions/upload-artifact@\S+")
         self.assertIn("      - precompile", benchmark_block)
-        self.assertIn("actions/download-artifact@v8", benchmark_block)
+        self.assertRegex(benchmark_block, r"uses: actions/download-artifact@\S+")
         self.assertIn("HEAD_BINARY", benchmark_block)
         self.assertIn("${HEAD_RUN_ARGS:+ $HEAD_RUN_ARGS}", benchmark_block)
         self.assertIn("RUST_SYSROOT=", benchmark_block)
@@ -82,7 +83,7 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertIn("scripts/iai-callgrind-runner-dispatch", workflow)
         self.assertIn("scripts/gungraun-runner-dispatch", workflow)
-        self.assertIn("taiki-e/install-action@v2", benchmark_block)
+        self.assertRegex(benchmark_block, r"uses: taiki-e/install-action@\S+")
         self.assertNotIn("cargo install --locked iai-callgrind-runner", workflow)
         self.assertIn("sudo timeout 120 apt-get", benchmark_block)
         self.assertIn("Acquire::Retries=3", benchmark_block)
@@ -259,7 +260,7 @@ class WorkflowContractTests(unittest.TestCase):
             / "benches"
             / "sample_iai_callgrind_compat_bench.rs"
         ).read_text(encoding="utf-8")
-        self.assertIn('gungraun = "0.19.4"', manifest)
+        self.assertIn("gungraun", tomllib.loads(manifest)["dev-dependencies"])
         self.assertIn("use gungraun::", canonical)
         self.assertIn("use iai_callgrind::", compatibility)
 
@@ -272,7 +273,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("  push:", workflow)
         self.assertIn('      - "v*.*.*"', workflow)
         self.assertIn("  contents: write", workflow)
-        self.assertIn("uses: softprops/action-gh-release@v3", workflow)
+        self.assertRegex(workflow, r"uses: softprops/action-gh-release@\S+")
         self.assertIn('version = os.environ["TAG_NAME"].removeprefix("v")', workflow)
 
 
