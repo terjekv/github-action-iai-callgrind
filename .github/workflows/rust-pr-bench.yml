@@ -151,7 +151,7 @@ jobs:
           exit 1
 
       - name: Checkout benchmark action repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
@@ -177,7 +177,7 @@ jobs:
             --iai-callgrind-threshold "$LEGACY_THRESHOLD_INPUT"
 
       - name: Checkout caller repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           path: repo
@@ -256,7 +256,7 @@ jobs:
     steps:
       - name: Checkout benchmark action repository
         if: matrix.enabled
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
@@ -264,14 +264,14 @@ jobs:
 
       - name: Checkout caller repository
         if: matrix.enabled
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           path: repo
 
       - name: Install Rust
         if: matrix.enabled
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: ${{ inputs.toolchain }}
 
@@ -291,7 +291,7 @@ jobs:
 
       - name: Upload benchmark executables
         if: matrix.enabled
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.group_id }}-${{ matrix.side }}
           path: precompiled
@@ -320,14 +320,14 @@ jobs:
           exit 1
 
       - name: Checkout benchmark action repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Checkout caller repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           path: repo
@@ -354,13 +354,13 @@ jobs:
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: ${{ inputs.toolchain }}
 
       - name: Install cargo-binstall for exact-version runner dispatch
         if: ${{ matrix.backend == 'gungraun' }}
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.6
         with:
           tool: cargo-binstall
 
@@ -389,7 +389,7 @@ jobs:
       - name: Download precompiled head benchmark
         if: matrix.precompile
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.build_group_id }}-head
           path: precompiled/head
@@ -397,7 +397,7 @@ jobs:
       - name: Download precompiled base benchmark
         if: matrix.precompile
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.build_group_id }}-base
           path: precompiled/base
@@ -464,7 +464,7 @@ jobs:
 
       - name: Upload result
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-${{ matrix.id }}
           path: |
@@ -489,14 +489,14 @@ jobs:
           exit 1
 
       - name: Checkout benchmark action repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           repository: ${{ inputs.action_repository }}
           ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Download benchmark artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-*
           path: artifacts
@@ -531,7 +531,7 @@ jobs:
 
       - name: Load Gungraun PR history
         if: github.event_name == 'pull_request' && needs.prepare-matrix.outputs.normalized_backend != 'criterion'
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         env:
           HISTORY_PATH: history-gungraun.json
           MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- gungraun-bench -->","<!-- iai-callgrind-bench -->"]'
@@ -551,7 +551,7 @@ jobs:
 
       - name: Load Criterion PR history
         if: github.event_name == 'pull_request' && needs.prepare-matrix.outputs.normalized_backend != 'gungraun'
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         env:
           HISTORY_PATH: history-criterion.json
           MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- criterion-bench -->"]'
@@ -570,7 +570,7 @@ jobs:
 
       - name: Load current PR regression override metadata
         if: github.event_name == 'pull_request' && inputs.regression_override_label != ''
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         env:
           METADATA_PATH: pr-regression-overrides.json
           APPROVAL_LABEL: ${{ inputs.regression_override_label }}
@@ -749,7 +749,7 @@ jobs:
           echo "value=bench-report-${{ needs.prepare-matrix.outputs.normalized_backend }}-${{ github.run_id }}-${{ github.run_attempt }}-$(date +%s%N)" >> "$GITHUB_OUTPUT"
 
       - name: Upload report artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ steps.report_artifact_name.outputs.value }}
           path: |
@@ -764,7 +764,7 @@ jobs:
           needs.prepare-matrix.outputs.normalized_backend != 'criterion' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_gungraun.outputs.has_regressions == 'true'))
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         env:
           REPORT_PATH: report-gungraun.md
           PRIMARY_MARKER: "<!-- gungraun-bench -->"
@@ -788,7 +788,7 @@ jobs:
           needs.prepare-matrix.outputs.normalized_backend != 'gungraun' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_criterion.outputs.has_regressions == 'true'))
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         env:
           REPORT_PATH: report-criterion.md
           PRIMARY_MARKER: "<!-- criterion-bench -->"
@@ -811,7 +811,7 @@ jobs:
           needs.prepare-matrix.outputs.normalized_backend == 'all' &&
           (inputs.comment_mode == 'always' ||
           (inputs.comment_mode == 'on-regression' && steps.render_overall.outputs.has_regressions == 'true'))
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         env:
           REPORT_PATH: report.md
           PRIMARY_MARKER: "<!-- rust-pr-bench -->"

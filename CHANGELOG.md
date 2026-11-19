@@ -9,6 +9,8 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ### Changed
 
+- Update the sample to Gungraun 0.20, refresh the Cargo lockfile, and update GitHub
+  Actions and the Python and Node.js versions used in self-tests.
 - Expand the v2-to-v3 migration guide with a staged upgrade path, before/after examples,
   and an explicit list of stable interfaces and machine-readable identifier changes.
 
