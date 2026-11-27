@@ -360,7 +360,7 @@ jobs:
 
       - name: Install cargo-binstall for exact-version runner dispatch
         if: ${{ matrix.backend == 'gungraun' }}
-        uses: taiki-e/install-action@v2.90.6
+        uses: taiki-e/install-action@v2.90.8
         with:
           tool: cargo-binstall
 
